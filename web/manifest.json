@@ -1,0 +1,35 @@
+{
+    "name": "Daily Katha",
+    "short_name": "Daily Katha",
+    "start_url": ".",
+    "display": "standalone",
+    "background_color": "#FFF7E6",
+    "theme_color": "#D97706",
+    "description": "Telugu-first devotional storytelling app for daily story journeys, quizzes, and rewards.",
+    "orientation": "portrait-primary",
+    "prefer_related_applications": false,
+    "icons": [
+        {
+            "src": "icons/Icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/Icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/Icon-maskable-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "maskable"
+        },
+        {
+            "src": "icons/Icon-maskable-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "maskable"
+        }
+    ]
+}
