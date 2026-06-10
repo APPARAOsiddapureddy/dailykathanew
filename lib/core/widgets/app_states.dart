@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../app/config.dart';
 import '../../app/theme.dart';
 
 class AppLoading extends StatelessWidget {
@@ -102,10 +103,11 @@ class KathaNetworkImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final imageUrl = _proxiedImageUrl(url);
     final image = url == null || url!.isEmpty
         ? Image.asset(fallbackAsset, fit: fit)
         : Image.network(
-            url!,
+            imageUrl!,
             fit: fit,
             cacheWidth: (MediaQuery.sizeOf(context).width * 2).round(),
             loadingBuilder: (context, child, event) {
@@ -128,4 +130,15 @@ class KathaNetworkImage extends StatelessWidget {
     if (borderRadius == null) return image;
     return ClipRRect(borderRadius: borderRadius!, child: image);
   }
+}
+
+String? _proxiedImageUrl(String? url) {
+  if (url == null || url.isEmpty) return null;
+  final uri = Uri.tryParse(url);
+  if (uri == null || !uri.hasScheme) return url;
+
+  final apiBaseUri = Uri.parse(AppConfig.apiBaseUrl);
+  if (uri.host == apiBaseUri.host && uri.port == apiBaseUri.port) return url;
+
+  return '${AppConfig.apiBaseUrl}/api/app/image-proxy?url=${Uri.encodeComponent(url)}';
 }

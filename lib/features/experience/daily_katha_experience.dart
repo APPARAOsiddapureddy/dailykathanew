@@ -1,7 +1,13 @@
 import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
+import '../../core/api/api_client.dart';
 import '../../core/widgets/app_logo.dart';
+import '../../core/widgets/app_states.dart';
+import '../stories/data/app_api_service.dart';
+import '../stories/models/story_models.dart';
+import 'data/user_api_service.dart';
+import 'models/app_user_models.dart';
 
 class DailyKathaExperience extends StatefulWidget {
   const DailyKathaExperience({super.key});
@@ -12,34 +18,171 @@ class DailyKathaExperience extends StatefulWidget {
 
 class _DailyKathaExperienceState extends State<DailyKathaExperience> {
   bool _showSplash = true;
-  bool _isLoggedIn = false;
+  bool _loadingSession = true;
   bool _otpRequested = false;
-  bool _onboarded = false;
+  bool _profileRequested = false;
+  bool _checkingPhone = false;
+  bool _onboarded = true;
+  bool _loadingContent = false;
   int _tabIndex = 0;
-  int _points = 50;
-  int _streak = 5;
-  final Set<String> _interests = {'మహాభారతం', 'శ్రీకృష్ణ కథలు'};
-  final Set<int> _completedDays = {1, 2, 3, 4};
-  bool _cardUnlocked = true;
+  String _phoneNumber = '';
+  String? _newUserName;
+  String? _error;
 
-  void _finishAuth() {
-    setState(() {
-      _isLoggedIn = true;
-      _otpRequested = false;
-    });
+  AppSession? _session;
+  AppUser? _user;
+  ProfileSummary _summary = const ProfileSummary(
+    completedStories: 0,
+    answeredQuestions: 0,
+    correctAnswers: 0,
+  );
+  UserProgress _progress = UserProgress.empty;
+  List<Story> _stories = const [];
+  List<EarnedBadge> _badges = const [];
+
+  AppApiService get _storyApi => AppApiService(authToken: _session?.token);
+  UserApiService get _userApi =>
+      UserApiService(client: ApiClient(authToken: _session?.token));
+
+  @override
+  void initState() {
+    super.initState();
+    _restoreSession();
   }
 
-  void _finishOnboarding() {
-    setState(() => _onboarded = true);
+  Future<void> _restoreSession() async {
+    final session = await UserApiService.restoreSession();
+    if (!mounted) return;
+    setState(() {
+      _session = session;
+      _user = session?.user;
+      _loadingSession = false;
+    });
+    if (session != null) await _refreshContent();
   }
 
-  void _completeDay(int score, int total) {
+  Future<void> _createSession() async {
     setState(() {
-      _completedDays.add(5);
-      _points += 10 + (score == total ? 5 : 0);
-      _streak = 6;
-      _cardUnlocked = true;
+      _loadingSession = true;
+      _error = null;
     });
+
+    try {
+      final session = await UserApiService().createSession(
+        phoneNumber: '+91$_phoneNumber',
+        name: _newUserName,
+      );
+      await UserApiService.saveSession(session);
+      if (!mounted) return;
+      setState(() {
+        _session = session;
+        _user = session.user;
+        _otpRequested = false;
+        _profileRequested = false;
+        _newUserName = null;
+      });
+      await _refreshContent();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _error = '$error');
+    } finally {
+      if (mounted) setState(() => _loadingSession = false);
+    }
+  }
+
+  Future<void> _checkPhoneAndContinue(String phone) async {
+    setState(() {
+      _phoneNumber = phone;
+      _checkingPhone = true;
+      _error = null;
+    });
+
+    try {
+      final phoneCheck = await UserApiService().checkPhone('+91$phone');
+      if (!mounted) return;
+      setState(() {
+        _otpRequested = phoneCheck.exists && !phoneCheck.needsProfile;
+        _profileRequested = phoneCheck.needsProfile;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _error = '$error');
+    } finally {
+      if (mounted) setState(() => _checkingPhone = false);
+    }
+  }
+
+  Future<void> _refreshContent() async {
+    if (_session == null) return;
+    setState(() {
+      _loadingContent = true;
+      _error = null;
+    });
+
+    try {
+      final results = await Future.wait<Object>([
+        _storyApi.fetchStories(),
+        _userApi.fetchMe(),
+        _userApi.fetchProgress(),
+        _userApi.fetchProfileSummary(),
+        _userApi.fetchBadges(),
+      ]);
+      await _userApi.markActive();
+      if (!mounted) return;
+      setState(() {
+        _stories = results[0] as List<Story>;
+        _user = results[1] as AppUser;
+        _progress = results[2] as UserProgress;
+        _summary = results[3] as ProfileSummary;
+        _badges = results[4] as List<EarnedBadge>;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _error = '$error');
+    } finally {
+      if (mounted) setState(() => _loadingContent = false);
+    }
+  }
+
+  Future<void> _openJourney(Story story) async {
+    await _userApi.startStory(story.id);
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => StoryJourneyScreen(
+          story: story,
+          progress: _progress,
+          onStartDay: (day) => _openReader(story, day),
+        ),
+      ),
+    );
+    await _refreshContent();
+  }
+
+  Future<void> _openReader(Story story, StoryDaySummary day) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => StoryReaderScreen(
+          story: story,
+          day: day,
+          storyApi: _storyApi,
+          userApi: _userApi,
+          onFinished: _refreshContent,
+        ),
+      ),
+    );
+  }
+
+  StoryDaySummary? _nextReadableDay(Story story) {
+    if (story.days.isEmpty) return null;
+    final completedIds = _progress.kathaProgress
+        .where((item) => item.storyId == story.id && item.completed)
+        .map((item) => item.storyDayId)
+        .toSet();
+    for (final day in story.days) {
+      if (!completedIds.contains(day.id)) return day;
+    }
+    return story.days.last;
   }
 
   @override
@@ -49,95 +192,80 @@ class _DailyKathaExperienceState extends State<DailyKathaExperience> {
         onContinue: () => setState(() => _showSplash = false),
       );
     }
-    if (!_isLoggedIn) {
+
+    if (_loadingSession) {
+      return const Scaffold(
+        body: AppLoading(message: 'Opening Daily Katha...'),
+      );
+    }
+
+    if (_session == null) {
+      if (_profileRequested) {
+        return NewUserProfileScreen(
+          phoneNumber: '+91$_phoneNumber',
+          error: _error,
+          onBack: () {
+            setState(() {
+              _profileRequested = false;
+              _newUserName = null;
+              _error = null;
+            });
+          },
+          onContinue: (name) {
+            setState(() {
+              _newUserName = name;
+              _profileRequested = false;
+              _otpRequested = true;
+              _error = null;
+            });
+          },
+        );
+      }
+
       return _otpRequested
           ? OtpScreen(
-              onVerified: _finishAuth,
-              onChangeNumber: () => setState(() => _otpRequested = false),
+              error: _error,
+              onVerified: _createSession,
+              onChangeNumber: () => setState(() {
+                _otpRequested = false;
+                _newUserName = null;
+              }),
             )
           : LoginScreen(
-              onOtpRequested: () => setState(() => _otpRequested = true),
+              checking: _checkingPhone,
+              error: _error,
+              onOtpRequested: _checkPhoneAndContinue,
             );
     }
+
     if (!_onboarded) {
       return OnboardingScreen(
-        selected: _interests,
-        onToggle: (interest) {
-          setState(() {
-            if (_interests.contains(interest)) {
-              _interests.remove(interest);
-            } else {
-              _interests.add(interest);
-            }
-          });
-        },
-        onContinue: _finishOnboarding,
+        onContinue: () => setState(() => _onboarded = true),
       );
     }
 
     return MainShell(
       tabIndex: _tabIndex,
       onTabChanged: (index) => setState(() => _tabIndex = index),
-      points: _points,
-      streak: _streak,
-      completedDays: _completedDays,
-      cardUnlocked: _cardUnlocked,
-      onStartToday: () => _openStoryDetail(context),
-      onOpenReader: () => _openReader(context),
-    );
-  }
-
-  void _openStoryDetail(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => StoryJourneyScreen(
-          completedDays: _completedDays,
-          onStart: () {
-            Navigator.of(context).pop();
-            _openReader(context);
-          },
-        ),
-      ),
-    );
-  }
-
-  void _openReader(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => StoryReaderScreen(
-          onComplete: () {
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute<void>(
-                builder: (_) => QuizFlowScreen(
-                  onComplete: (score, total) {
-                    _completeDay(score, total);
-                    Navigator.of(context).pushReplacement(
-                      MaterialPageRoute<void>(
-                        builder: (_) => CompletionRewardScreen(
-                          score: score,
-                          total: total,
-                          points: _points + 10 + (score == total ? 5 : 0),
-                          streak: 6,
-                          onUnlockCard: () {
-                            Navigator.of(context).pushReplacement(
-                              MaterialPageRoute<void>(
-                                builder: (_) => const ShareCardScreen(),
-                              ),
-                            );
-                          },
-                          onHome: () => Navigator.of(
-                            context,
-                          ).popUntil((route) => route.isFirst),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            );
-          },
-        ),
-      ),
+      loading: _loadingContent,
+      error: _error,
+      user: _user,
+      stories: _stories,
+      progress: _progress,
+      summary: _summary,
+      badges: _badges,
+      onRetry: _refreshContent,
+      onOpenJourney: _openJourney,
+      onOpenFirstStory: () {
+        if (_stories.isEmpty) return;
+        final story = _stories.first;
+        final day = _nextReadableDay(story);
+        if (day == null) {
+          _openJourney(story);
+        } else {
+          _openReader(story, day);
+        }
+      },
     );
   }
 }
@@ -160,45 +288,30 @@ class SplashScreen extends StatelessWidget {
               colors: [Color(0xFFFFE7B3), AppColors.ivory],
             ),
           ),
-          child: SafeArea(
+          child: const SafeArea(
             child: Center(
-              child: Padding(
-                padding: const EdgeInsets.all(28),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const AppLogo(size: 184),
-                    const SizedBox(height: 34),
-                    Text(
-                      'Daily Katha',
-                      style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                        color: AppColors.deepSaffron,
-                        fontSize: 38,
-                      ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  AppLogo(size: 168),
+                  SizedBox(height: 28),
+                  Text(
+                    'Daily Katha',
+                    style: TextStyle(
+                      color: AppColors.deepSaffron,
+                      fontSize: 38,
+                      fontWeight: FontWeight.w900,
                     ),
-                    const SizedBox(height: 14),
-                    const Text(
-                      'ప్రతి రోజు ఒక కథ, ఒక మంచి పాఠం',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: AppColors.mutedBrown,
-                        fontSize: 19,
-                        height: 1.5,
-                        fontWeight: FontWeight.w700,
-                      ),
+                  ),
+                  SizedBox(height: 12),
+                  Text(
+                    'Tap to continue',
+                    style: TextStyle(
+                      color: AppColors.mutedBrown,
+                      fontWeight: FontWeight.w800,
                     ),
-                    const SizedBox(height: 54),
-                    const _ProgressLine(),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Tap to continue',
-                      style: TextStyle(
-                        color: AppColors.deepSaffron,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -209,9 +322,16 @@ class SplashScreen extends StatelessWidget {
 }
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key, required this.onOtpRequested});
+  const LoginScreen({
+    super.key,
+    required this.onOtpRequested,
+    required this.checking,
+    this.error,
+  });
 
-  final VoidCallback onOtpRequested;
+  final ValueChanged<String> onOtpRequested;
+  final bool checking;
+  final String? error;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -223,39 +343,28 @@ class _LoginScreenState extends State<LoginScreen> {
   void _append(String value) {
     if (_number.length >= 10) return;
     setState(() => _number += value);
-    if (_number.length == 10) {
-      Future<void>.delayed(
-        const Duration(milliseconds: 180),
-        widget.onOtpRequested,
-      );
-    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final ready = _number.length == 10;
     final formatted = _number.isEmpty
         ? '00000 00000'
-        : '${_number.substring(0, _number.length > 5 ? 5 : _number.length)}${_number.length > 5 ? ' ${_number.substring(5)}' : ''}';
-    final ready = _number.length == 10;
+        : '${_number.substring(0, _number.length > 5 ? 5 : _number.length)}'
+              '${_number.length > 5 ? ' ${_number.substring(5)}' : ''}';
 
     return Scaffold(
       body: SafeArea(
         child: Column(
           children: [
-            const SizedBox(height: 34),
-            const AppLogo(size: 76),
-            const SizedBox(height: 24),
-            Text(
-              'Daily Katha లోకి స్వాగతం',
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
+            const SizedBox(height: 40),
+            const AppLogo(size: 82),
+            const SizedBox(height: 26),
+            Text('Welcome', style: Theme.of(context).textTheme.headlineMedium),
             const SizedBox(height: 8),
             const Text(
-              'మీ రోజువారీ కథ ప్రయాణాన్ని ప్రారంభించండి',
-              style: TextStyle(
-                color: AppColors.mutedBrown,
-                fontWeight: FontWeight.w700,
-              ),
+              'Enter your mobile number to start your journey',
+              style: TextStyle(color: AppColors.mutedBrown),
             ),
             const SizedBox(height: 40),
             Padding(
@@ -265,10 +374,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(24),
-                  border: Border.all(
-                    color: AppColors.deepSaffron.withValues(alpha: 0.45),
-                    width: 2,
-                  ),
+                  border: Border.all(color: AppColors.border),
                   boxShadow: _softShadow,
                 ),
                 child: Row(
@@ -304,33 +410,137 @@ class _LoginScreenState extends State<LoginScreen> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 22),
               child: FilledButton(
-                onPressed: ready ? widget.onOtpRequested : null,
-                child: const Text('OTP పొందండి'),
+                onPressed: ready && !widget.checking
+                    ? () => widget.onOtpRequested(_number)
+                    : null,
+                child: Text(widget.checking ? 'Checking...' : 'Get OTP'),
               ),
             ),
-            const SizedBox(height: 10),
-            const Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.lock_rounded, size: 17, color: AppColors.mutedBrown),
-                SizedBox(width: 6),
-                Text(
-                  'మీ నంబర్ సురక్షితంగా ఉంటుంది',
-                  style: TextStyle(color: AppColors.mutedBrown),
+            if (widget.error != null) ...[
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 22),
+                child: Text(
+                  widget.error!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: AppColors.error,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
-              ],
-            ),
-            const SizedBox(height: 18),
+              ),
+            ],
+            const SizedBox(height: 16),
             _Keypad(
               onDigit: _append,
               onBackspace: () {
-                if (_number.isNotEmpty)
+                if (_number.isNotEmpty) {
                   setState(
                     () => _number = _number.substring(0, _number.length - 1),
                   );
+                }
               },
             ),
             const SizedBox(height: 18),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class NewUserProfileScreen extends StatefulWidget {
+  const NewUserProfileScreen({
+    super.key,
+    required this.phoneNumber,
+    required this.onContinue,
+    required this.onBack,
+    this.error,
+  });
+
+  final String phoneNumber;
+  final ValueChanged<String> onContinue;
+  final VoidCallback onBack;
+  final String? error;
+
+  @override
+  State<NewUserProfileScreen> createState() => _NewUserProfileScreenState();
+}
+
+class _NewUserProfileScreenState extends State<NewUserProfileScreen> {
+  final _nameController = TextEditingController();
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final name = _nameController.text.trim();
+
+    return Scaffold(
+      appBar: AppBar(
+        leading: IconButton(
+          onPressed: widget.onBack,
+          icon: const Icon(Icons.arrow_back_rounded),
+        ),
+      ),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(22),
+          children: [
+            const SizedBox(height: 28),
+            const AppLogo(size: 86),
+            const SizedBox(height: 28),
+            Text(
+              'Create your profile',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.displaySmall,
+            ),
+            const SizedBox(height: 10),
+            Text(
+              widget.phoneNumber,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: AppColors.deepSaffron,
+                fontSize: 20,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 34),
+            TextField(
+              controller: _nameController,
+              textInputAction: TextInputAction.done,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Name',
+                hintText: 'Enter your name',
+                prefixIcon: Icon(Icons.person_rounded),
+              ),
+              onChanged: (_) => setState(() {}),
+              onSubmitted: (_) {
+                if (name.isNotEmpty) widget.onContinue(name);
+              },
+            ),
+            if (widget.error != null) ...[
+              const SizedBox(height: 14),
+              Text(
+                widget.error!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: AppColors.error,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+            const SizedBox(height: 28),
+            FilledButton.icon(
+              onPressed: name.isEmpty ? null : () => widget.onContinue(name),
+              icon: const Icon(Icons.arrow_forward_rounded),
+              label: const Text('Continue to OTP'),
+            ),
           ],
         ),
       ),
@@ -343,10 +553,12 @@ class OtpScreen extends StatefulWidget {
     super.key,
     required this.onVerified,
     required this.onChangeNumber,
+    this.error,
   });
 
   final VoidCallback onVerified;
   final VoidCallback onChangeNumber;
+  final String? error;
 
   @override
   State<OtpScreen> createState() => _OtpScreenState();
@@ -361,10 +573,15 @@ class _OtpScreenState extends State<OtpScreen> {
     setState(() => _otp += value);
     if (_otp.length == 4) {
       setState(() => _verifying = true);
-      Future<void>.delayed(
-        const Duration(milliseconds: 700),
-        widget.onVerified,
-      );
+      widget.onVerified();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant OtpScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.error != null && widget.error != oldWidget.error) {
+      setState(() => _verifying = false);
     }
   }
 
@@ -378,20 +595,14 @@ class _OtpScreenState extends State<OtpScreen> {
             children: [
               const Spacer(),
               Text(
-                'OTP నమోదు చేయండి',
-                style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                  color: AppColors.deepSaffron,
-                ),
+                'Enter OTP',
+                style: Theme.of(context).textTheme.displaySmall,
               ),
               const SizedBox(height: 10),
               const Text(
-                'మీ మొబైల్ నంబర్‌కు పంపిన 4 అంకెల OTP ని నమోదు చేయండి',
+                'Temporary development login. OTP service will be added later.',
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: AppColors.mutedBrown,
-                  fontSize: 16,
-                  height: 1.5,
-                ),
+                style: TextStyle(color: AppColors.mutedBrown),
               ),
               const SizedBox(height: 34),
               Row(
@@ -424,35 +635,30 @@ class _OtpScreenState extends State<OtpScreen> {
               ),
               const SizedBox(height: 18),
               if (_verifying)
-                const Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2.4),
-                    ),
-                    SizedBox(width: 10),
-                    Text(
-                      'ధృవీకరిస్తున్నాము...',
-                      style: TextStyle(
-                        color: AppColors.deepSaffron,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ],
-                )
+                const CircularProgressIndicator()
               else
                 TextButton(
                   onPressed: widget.onChangeNumber,
-                  child: const Text('మొబైల్ నంబర్ మార్చండి'),
+                  child: const Text('Change number'),
                 ),
+              if (widget.error != null) ...[
+                const SizedBox(height: 16),
+                Text(
+                  widget.error!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: AppColors.error,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
               const Spacer(),
               _Keypad(
                 onDigit: _append,
                 onBackspace: () {
-                  if (_otp.isNotEmpty && !_verifying)
+                  if (_otp.isNotEmpty && !_verifying) {
                     setState(() => _otp = _otp.substring(0, _otp.length - 1));
+                  }
                 },
               ),
             ],
@@ -464,90 +670,40 @@ class _OtpScreenState extends State<OtpScreen> {
 }
 
 class OnboardingScreen extends StatelessWidget {
-  const OnboardingScreen({
-    super.key,
-    required this.selected,
-    required this.onToggle,
-    required this.onContinue,
-  });
+  const OnboardingScreen({super.key, required this.onContinue});
 
-  final Set<String> selected;
-  final ValueChanged<String> onToggle;
   final VoidCallback onContinue;
-
-  static const interests = [
-    ('మహాభారతం', Icons.history_edu_rounded),
-    ('రామాయణం', Icons.menu_book_rounded),
-    ('శ్రీకృష్ణ కథలు', Icons.music_note_rounded),
-    ('శివ కథలు', Icons.brightness_high_rounded),
-    ('ఆలయ కథలు', Icons.account_balance_rounded),
-    ('పండుగ కథలు', Icons.celebration_rounded),
-    ('పిల్లల కథలు', Icons.child_care_rounded),
-  ];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
-        child: Column(
-          children: [
-            const SizedBox(height: 30),
-            const AppLogo(size: 70),
-            const SizedBox(height: 22),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 22),
-              child: Column(
-                children: [
-                  Text(
-                    'మీకు ఏ కథలు ఇష్టం?',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.displaySmall,
-                  ),
-                  const SizedBox(height: 10),
-                  const Text(
-                    'మీకు నచ్చిన కథలను ఎంచుకోండి. మేము వాటిని మీ కోసం సిద్ధం చేస్తాము.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: AppColors.mutedBrown,
-                      height: 1.5,
-                      fontSize: 16,
-                    ),
-                  ),
-                ],
+        child: Padding(
+          padding: const EdgeInsets.all(22),
+          child: Column(
+            children: [
+              const Spacer(),
+              const AppLogo(size: 92),
+              const SizedBox(height: 22),
+              Text(
+                'Daily Katha is ready',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.displaySmall,
               ),
-            ),
-            const SizedBox(height: 28),
-            Expanded(
-              child: GridView.builder(
-                padding: const EdgeInsets.fromLTRB(22, 0, 22, 22),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  mainAxisSpacing: 14,
-                  crossAxisSpacing: 14,
-                  childAspectRatio: 1.12,
-                ),
-                itemCount: interests.length,
-                itemBuilder: (context, index) {
-                  final (title, icon) = interests[index];
-                  final isSelected = selected.contains(title);
-                  return _InterestTile(
-                    title: title,
-                    icon: icon,
-                    selected: isSelected,
-                    onTap: () => onToggle(title),
-                  );
-                },
+              const SizedBox(height: 10),
+              const Text(
+                'Your stories and progress will come from the backend.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: AppColors.mutedBrown),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(22, 0, 22, 22),
-              child: FilledButton.icon(
-                onPressed: selected.isEmpty ? null : onContinue,
+              const Spacer(),
+              FilledButton.icon(
+                onPressed: onContinue,
                 icon: const Icon(Icons.arrow_forward_rounded),
-                label: const Text('నా Daily Katha ప్రారంభించండి'),
+                label: const Text('Continue'),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -559,42 +715,61 @@ class MainShell extends StatelessWidget {
     super.key,
     required this.tabIndex,
     required this.onTabChanged,
-    required this.points,
-    required this.streak,
-    required this.completedDays,
-    required this.cardUnlocked,
-    required this.onStartToday,
-    required this.onOpenReader,
+    required this.loading,
+    required this.error,
+    required this.user,
+    required this.stories,
+    required this.progress,
+    required this.summary,
+    required this.badges,
+    required this.onRetry,
+    required this.onOpenJourney,
+    required this.onOpenFirstStory,
   });
 
   final int tabIndex;
   final ValueChanged<int> onTabChanged;
-  final int points;
-  final int streak;
-  final Set<int> completedDays;
-  final bool cardUnlocked;
-  final VoidCallback onStartToday;
-  final VoidCallback onOpenReader;
+  final bool loading;
+  final String? error;
+  final AppUser? user;
+  final List<Story> stories;
+  final UserProgress progress;
+  final ProfileSummary summary;
+  final List<EarnedBadge> badges;
+  final VoidCallback onRetry;
+  final ValueChanged<Story> onOpenJourney;
+  final VoidCallback onOpenFirstStory;
 
   @override
   Widget build(BuildContext context) {
+    if (loading && stories.isEmpty) {
+      return const Scaffold(body: AppLoading(message: 'Loading app data...'));
+    }
+
+    if (error != null && stories.isEmpty) {
+      return Scaffold(
+        body: ErrorState(message: error!, onRetry: onRetry),
+      );
+    }
+
     final pages = [
       HomeScreen(
-        points: points,
-        streak: streak,
-        onStartToday: onStartToday,
-        onOpenReader: onOpenReader,
+        user: user,
+        stories: stories,
+        progress: progress,
+        onStartToday: onOpenFirstStory,
+        onOpenJourney: onOpenJourney,
       ),
-      LibraryScreen(onOpenJourney: onStartToday),
-      CardsScreen(cardUnlocked: cardUnlocked),
-      ProfileScreen(
-        points: points,
-        streak: streak,
-        completedDays: completedDays.length,
-      ),
+      LibraryScreen(stories: stories, onOpenJourney: onOpenJourney),
+      const CardsScreen(),
+      ProfileScreen(user: user, summary: summary, badges: badges),
     ];
+
     return Scaffold(
-      body: pages[tabIndex],
+      body: RefreshIndicator(
+        onRefresh: () async => onRetry(),
+        child: pages[tabIndex],
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: tabIndex,
         onDestinationSelected: onTabChanged,
@@ -623,160 +798,168 @@ class MainShell extends StatelessWidget {
 class HomeScreen extends StatelessWidget {
   const HomeScreen({
     super.key,
-    required this.points,
-    required this.streak,
+    required this.user,
+    required this.stories,
+    required this.progress,
     required this.onStartToday,
-    required this.onOpenReader,
+    required this.onOpenJourney,
   });
 
-  final int points;
-  final int streak;
+  final AppUser? user;
+  final List<Story> stories;
+  final UserProgress progress;
   final VoidCallback onStartToday;
-  final VoidCallback onOpenReader;
+  final ValueChanged<Story> onOpenJourney;
 
   @override
   Widget build(BuildContext context) {
+    final firstStory = stories.isEmpty ? null : stories.first;
+    final displayName = user?.name?.isNotEmpty == true
+        ? user!.name!
+        : 'Daily Katha';
+
     return SafeArea(
       bottom: false,
-      child: CustomScrollView(
-        slivers: [
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const CircleAvatar(
-                        backgroundColor: Color(0xFFFFE7B3),
-                        child: Icon(
-                          Icons.account_circle_rounded,
-                          color: AppColors.deepSaffron,
-                        ),
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 110),
+        children: [
+          Row(
+            children: [
+              const CircleAvatar(
+                backgroundColor: Color(0xFFFFE7B3),
+                child: Icon(Icons.person_rounded, color: AppColors.deepSaffron),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Namaskaram',
+                      style: TextStyle(
+                        color: AppColors.mutedBrown,
+                        fontWeight: FontWeight.w700,
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'నమస్కారం',
-                              style: TextStyle(
-                                color: AppColors.mutedBrown,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            Text(
-                              'Daily Katha',
-                              style: Theme.of(context).textTheme.titleLarge
-                                  ?.copyWith(color: AppColors.deepSaffron),
-                            ),
-                          ],
-                        ),
-                      ),
-                      _MetricPill(
-                        icon: Icons.monetization_on_rounded,
-                        label: '$points',
-                        color: AppColors.gold,
-                      ),
-                      const SizedBox(width: 8),
-                      _MetricPill(
-                        icon: Icons.local_fire_department_rounded,
-                        label: '$streak',
-                        color: AppColors.saffron,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 26),
-                  Text(
-                    'ఈరోజు కథ',
-                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      color: AppColors.deepSaffron,
                     ),
-                  ),
-                  const SizedBox(height: 14),
-                  _TodayHero(onStart: onOpenReader),
-                  const SizedBox(height: 30),
-                  _SectionTitle(title: 'Continue Journey', action: 'View all'),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    height: 138,
-                    child: ListView(
-                      scrollDirection: Axis.horizontal,
-                      children: [
-                        _JourneyMiniCard(
-                          title: 'రామాయణం',
-                          subtitle: 'అరణ్యకాండ',
-                          progress: .60,
-                          color: AppColors.deepSaffron,
-                        ),
-                        _JourneyMiniCard(
-                          title: 'శివ పురాణం',
-                          subtitle: 'Episode 4',
-                          progress: .25,
-                          color: AppColors.maroon,
-                        ),
-                        _JourneyMiniCard(
-                          title: 'ఆలయ కథలు',
-                          subtitle: 'తిరుపతి',
-                          progress: .42,
-                          color: AppColors.success,
-                        ),
-                      ],
+                    Text(
+                      displayName,
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: AppColors.deepSaffron,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 28),
-                  _SectionTitle(title: 'Story Worlds', action: 'Explore'),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    children: const [
-                      _WorldChip(
-                        label: 'మహాభారతం',
-                        icon: Icons.history_edu_rounded,
-                      ),
-                      _WorldChip(
-                        label: 'రామాయణం',
-                        icon: Icons.menu_book_rounded,
-                      ),
-                      _WorldChip(
-                        label: 'భాగవతం',
-                        icon: Icons.music_note_rounded,
-                      ),
-                      _WorldChip(
-                        label: 'ఆలయ కథలు',
-                        icon: Icons.account_balance_rounded,
-                      ),
-                      _WorldChip(
-                        label: 'పండుగలు',
-                        icon: Icons.celebration_rounded,
-                      ),
-                      _WorldChip(
-                        label: 'పిల్లల కథలు',
-                        icon: Icons.child_care_rounded,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 28),
-                  _MoralCard(),
-                  const SizedBox(height: 28),
-                  _SectionTitle(title: 'Unlocked Cards', action: 'Cards'),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: const [
-                      Expanded(child: _SmallSharePreview(title: 'ధర్మమే జయం')),
-                      SizedBox(width: 12),
-                      Expanded(
-                        child: _SmallSharePreview(title: 'కర్మే మార్గం'),
-                      ),
-                    ],
-                  ),
-                ],
+                  ],
+                ),
+              ),
+              _MetricPill(
+                icon: Icons.stars_rounded,
+                label: '${user?.points ?? 0}',
+                color: AppColors.gold,
+              ),
+              const SizedBox(width: 8),
+              _MetricPill(
+                icon: Icons.local_fire_department_rounded,
+                label: '${user?.currentStreak ?? 0}',
+                color: AppColors.saffron,
+              ),
+            ],
+          ),
+          const SizedBox(height: 26),
+          Text(
+            'Today Story',
+            style: Theme.of(
+              context,
+            ).textTheme.headlineMedium?.copyWith(color: AppColors.deepSaffron),
+          ),
+          const SizedBox(height: 14),
+          if (firstStory == null)
+            const EmptyState(
+              icon: Icons.auto_stories_rounded,
+              title: 'No stories published yet',
+              message: 'Stories added from the CMS will appear here.',
+            )
+          else
+            _TodayHero(story: firstStory, onStart: onStartToday),
+          const SizedBox(height: 28),
+          _SectionTitle(title: 'Continue Journey', action: ''),
+          const SizedBox(height: 12),
+          if (stories.isEmpty)
+            const Text(
+              'No journeys available yet.',
+              style: TextStyle(color: AppColors.mutedBrown),
+            )
+          else
+            SizedBox(
+              height: 142,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemBuilder: (context, index) {
+                  final story = stories[index];
+                  return _JourneyMiniCard(
+                    story: story,
+                    progress: _storyProgressFraction(story, progress),
+                    onTap: () => onOpenJourney(story),
+                  );
+                },
+                separatorBuilder: (_, __) => const SizedBox(width: 12),
+                itemCount: stories.length,
               ),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+class LibraryScreen extends StatelessWidget {
+  const LibraryScreen({
+    super.key,
+    required this.stories,
+    required this.onOpenJourney,
+  });
+
+  final List<Story> stories;
+  final ValueChanged<Story> onOpenJourney;
+
+  @override
+  Widget build(BuildContext context) {
+    final grouped = <String, List<Story>>{};
+    for (final story in stories) {
+      grouped.putIfAbsent(story.categoryName, () => []).add(story);
+    }
+
+    return SafeArea(
+      bottom: false,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
+        children: [
+          Text('Kathalu', style: Theme.of(context).textTheme.displaySmall),
+          const SizedBox(height: 8),
+          const Text(
+            'Story worlds from your CMS',
+            style: TextStyle(color: AppColors.mutedBrown, fontSize: 16),
           ),
+          const SizedBox(height: 24),
+          if (stories.isEmpty)
+            const EmptyState(
+              icon: Icons.auto_stories_rounded,
+              title: 'No published kathalu',
+              message: 'Publish stories and days in the CMS to show them here.',
+            )
+          else
+            for (final entry in grouped.entries) ...[
+              _SectionTitle(title: entry.key, action: ''),
+              const SizedBox(height: 12),
+              ...entry.value.map(
+                (story) => Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _LibraryRow(
+                    story: story,
+                    onTap: () => onOpenJourney(story),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
         ],
       ),
     );
@@ -786,17 +969,30 @@ class HomeScreen extends StatelessWidget {
 class StoryJourneyScreen extends StatelessWidget {
   const StoryJourneyScreen({
     super.key,
-    required this.completedDays,
-    required this.onStart,
+    required this.story,
+    required this.progress,
+    required this.onStartDay,
   });
 
-  final Set<int> completedDays;
-  final VoidCallback onStart;
+  final Story story;
+  final UserProgress progress;
+  final ValueChanged<StoryDaySummary> onStartDay;
 
   @override
   Widget build(BuildContext context) {
+    final completedIds = progress.kathaProgress
+        .where((item) => item.storyId == story.id && item.completed)
+        .map((item) => item.storyDayId)
+        .toSet();
+    final currentDay = _firstIncompleteDay(story, completedIds);
+    final completedCount = story.days
+        .where((day) => completedIds.contains(day.id))
+        .length;
+    final totalDays = story.days.length;
+    final progressValue = totalDays == 0 ? 0.0 : completedCount / totalDays;
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Mahabharatam 100 Days Journey')),
+      appBar: AppBar(title: Text(story.title)),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 110),
@@ -808,10 +1004,7 @@ class StoryJourneyScreen extends StatelessWidget {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    Image.asset(
-                      'assets/mahabharatam-cover.png',
-                      fit: BoxFit.cover,
-                    ),
+                    KathaNetworkImage(url: story.coverImageUrl),
                     const DecoratedBox(
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
@@ -821,13 +1014,13 @@ class StoryJourneyScreen extends StatelessWidget {
                         ),
                       ),
                     ),
-                    const Positioned(
+                    Positioned(
                       left: 18,
                       right: 18,
                       bottom: 18,
                       child: Text(
-                        'మహాభారతం 100 రోజుల ప్రయాణం',
-                        style: TextStyle(
+                        story.title,
+                        style: const TextStyle(
                           color: Colors.white,
                           fontSize: 24,
                           fontWeight: FontWeight.w900,
@@ -846,10 +1039,10 @@ class StoryJourneyScreen extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Row(
+                      Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(
+                          const Text(
                             'Overall Progress',
                             style: TextStyle(
                               color: AppColors.deepSaffron,
@@ -857,8 +1050,8 @@ class StoryJourneyScreen extends StatelessWidget {
                             ),
                           ),
                           Text(
-                            'Day 5 of 100',
-                            style: TextStyle(
+                            '$completedCount of $totalDays',
+                            style: const TextStyle(
                               fontSize: 20,
                               fontWeight: FontWeight.w900,
                             ),
@@ -867,7 +1060,7 @@ class StoryJourneyScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 12),
                       LinearProgressIndicator(
-                        value: .05,
+                        value: progressValue,
                         minHeight: 8,
                         borderRadius: BorderRadius.circular(999),
                         color: AppColors.gold,
@@ -883,199 +1076,38 @@ class StoryJourneyScreen extends StatelessWidget {
               style: Theme.of(context).textTheme.headlineMedium,
             ),
             const SizedBox(height: 12),
-            ...List.generate(7, (index) {
-              final day = index + 1;
-              final completed = completedDays.contains(day);
-              final current = day == 5;
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: _DayTimelineTile(
-                  day: day,
-                  title: _dayTitles[index],
-                  completed: completed,
-                  current: current,
-                  locked: day > 5,
-                  onTap: current ? onStart : null,
-                ),
-              );
-            }),
+            if (story.days.isEmpty)
+              const EmptyState(
+                icon: Icons.event_busy_rounded,
+                title: 'No published days',
+                message: 'Publish days in the CMS to unlock this journey.',
+              )
+            else
+              ...story.days.map((day) {
+                final completed = completedIds.contains(day.id);
+                final current = currentDay?.id == day.id;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _DayTimelineTile(
+                    day: day,
+                    completed: completed,
+                    current: current,
+                    onTap: completed || current ? () => onStartDay(day) : null,
+                  ),
+                );
+              }),
           ],
         ),
       ),
       bottomSheet: Padding(
         padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
         child: FilledButton.icon(
-          onPressed: onStart,
+          onPressed: currentDay == null ? null : () => onStartDay(currentDay),
           icon: const Icon(Icons.play_arrow_rounded),
-          label: const Text('సందేశాన్ని కొనసాగించండి'),
-        ),
-      ),
-    );
-  }
-}
-
-class StoryReaderScreen extends StatefulWidget {
-  const StoryReaderScreen({super.key, required this.onComplete});
-
-  final VoidCallback onComplete;
-
-  @override
-  State<StoryReaderScreen> createState() => _StoryReaderScreenState();
-}
-
-class _StoryReaderScreenState extends State<StoryReaderScreen> {
-  final PageController _controller = PageController();
-  int _index = 0;
-  bool _paused = false;
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final slide = _slides[_index];
-    final finalSlide = _index == _slides.length - 1;
-
-    return Scaffold(
-      backgroundColor: AppColors.brown,
-      body: Center(
-        child: AspectRatio(
-          aspectRatio: 9 / 16,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 430),
-            child: Stack(
-              children: [
-                PageView.builder(
-                  controller: _controller,
-                  itemCount: _slides.length,
-                  onPageChanged: (value) => setState(() => _index = value),
-                  itemBuilder: (_, index) =>
-                      _StoryVisual(slide: _slides[index]),
-                ),
-                const DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Color(0xAA000000),
-                        Colors.transparent,
-                        Color(0xDD000000),
-                      ],
-                      stops: [0, .44, 1],
-                    ),
-                  ),
-                  child: SizedBox.expand(),
-                ),
-                SafeArea(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      children: [
-                        Row(
-                          children: List.generate(_slides.length, (index) {
-                            return Expanded(
-                              child: Container(
-                                height: 4,
-                                margin: EdgeInsets.only(
-                                  right: index == _slides.length - 1 ? 0 : 5,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: index <= _index
-                                      ? Colors.white
-                                      : Colors.white38,
-                                  borderRadius: BorderRadius.circular(99),
-                                ),
-                              ),
-                            );
-                          }),
-                        ),
-                        const SizedBox(height: 14),
-                        Row(
-                          children: [
-                            _RoundIconButton(
-                              icon: Icons.close_rounded,
-                              onTap: () => Navigator.of(context).pop(),
-                            ),
-                            const Spacer(),
-                            _RoundIconButton(
-                              icon: _paused
-                                  ? Icons.play_arrow_rounded
-                                  : Icons.pause_rounded,
-                              onTap: () => setState(() => _paused = !_paused),
-                            ),
-                            const SizedBox(width: 10),
-                            _RoundIconButton(
-                              icon: Icons.bookmark_border_rounded,
-                              onTap: () {},
-                            ),
-                            const SizedBox(width: 10),
-                            _RoundIconButton(
-                              icon: Icons.share_rounded,
-                              onTap: () {},
-                            ),
-                          ],
-                        ),
-                        const Spacer(),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(18),
-                          decoration: BoxDecoration(
-                            color: AppColors.ivory.withValues(alpha: .96),
-                            borderRadius: BorderRadius.circular(24),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                slide.title,
-                                style: Theme.of(
-                                  context,
-                                ).textTheme.headlineMedium,
-                              ),
-                              const SizedBox(height: 10),
-                              Text(
-                                slide.body,
-                                style: Theme.of(context).textTheme.bodyLarge,
-                              ),
-                              const SizedBox(height: 16),
-                              FilledButton.icon(
-                                onPressed: () {
-                                  if (finalSlide) {
-                                    widget.onComplete();
-                                  } else {
-                                    _controller.nextPage(
-                                      duration: const Duration(
-                                        milliseconds: 250,
-                                      ),
-                                      curve: Curves.easeOut,
-                                    );
-                                  }
-                                },
-                                icon: Icon(
-                                  finalSlide
-                                      ? Icons.quiz_rounded
-                                      : Icons.arrow_forward_rounded,
-                                ),
-                                label: Text(
-                                  finalSlide
-                                      ? 'Quiz ప్రారంభించండి'
-                                      : 'తర్వాతి స్లైడ్',
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
+          label: Text(
+            currentDay == null
+                ? 'No day available'
+                : 'Continue Day ${currentDay.dayNumber}',
           ),
         ),
       ),
@@ -1083,35 +1115,289 @@ class _StoryReaderScreenState extends State<StoryReaderScreen> {
   }
 }
 
-class QuizFlowScreen extends StatefulWidget {
-  const QuizFlowScreen({super.key, required this.onComplete});
+class StoryReaderScreen extends StatefulWidget {
+  const StoryReaderScreen({
+    super.key,
+    required this.story,
+    required this.day,
+    required this.storyApi,
+    required this.userApi,
+    required this.onFinished,
+  });
 
-  final void Function(int score, int total) onComplete;
+  final Story story;
+  final StoryDaySummary day;
+  final AppApiService storyApi;
+  final UserApiService userApi;
+  final VoidCallback onFinished;
+
+  @override
+  State<StoryReaderScreen> createState() => _StoryReaderScreenState();
+}
+
+class _StoryReaderScreenState extends State<StoryReaderScreen> {
+  late Future<DayDetail> _detailFuture;
+  final PageController _controller = PageController();
+  int _index = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _detailFuture = _loadDay();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<DayDetail> _loadDay() {
+    return widget.storyApi.fetchDay(
+      storyId: widget.story.id,
+      dayNumber: widget.day.dayNumber,
+    );
+  }
+
+  void _saveProgress(DayDetail detail, int index) {
+    widget.userApi.saveDayProgress(
+      storyDayId: detail.day.id,
+      lastPhotoIndex: index,
+    );
+  }
+
+  Future<void> _finishDayWithoutQuiz(DayDetail detail) async {
+    await widget.userApi.completeDay(detail.day.id);
+    widget.onFinished();
+    if (!mounted) return;
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute<void>(
+        builder: (_) => CompletionRewardScreen(day: widget.day, result: null),
+      ),
+    );
+  }
+
+  void _openQuiz(DayDetail detail) {
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute<void>(
+        builder: (_) => QuizFlowScreen(
+          day: widget.day,
+          detail: detail,
+          userApi: widget.userApi,
+          onFinished: widget.onFinished,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.brown,
+      body: FutureBuilder<DayDetail>(
+        future: _detailFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const AppLoading(message: 'Opening story...');
+          }
+          if (snapshot.hasError) {
+            return ErrorState(
+              message: '${snapshot.error}',
+              onRetry: () => setState(() => _detailFuture = _loadDay()),
+            );
+          }
+
+          final detail = snapshot.data!;
+          if (detail.photos.isEmpty) {
+            return SafeArea(
+              child: EmptyState(
+                icon: Icons.image_not_supported_rounded,
+                title: 'No photos for this day',
+                message: 'Photos uploaded in CMS will appear here.',
+                action: FilledButton(
+                  onPressed: detail.questions.isEmpty
+                      ? () => _finishDayWithoutQuiz(detail)
+                      : () => _openQuiz(detail),
+                  child: Text(
+                    detail.questions.isEmpty ? 'Complete Day' : 'Start Quiz',
+                  ),
+                ),
+              ),
+            );
+          }
+
+          final isFinalPhoto = _index == detail.photos.length - 1;
+          return Center(
+            child: AspectRatio(
+              aspectRatio: 9 / 16,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 430),
+                child: Stack(
+                  children: [
+                    PageView.builder(
+                      controller: _controller,
+                      itemCount: detail.photos.length,
+                      onPageChanged: (index) {
+                        setState(() => _index = index);
+                        _saveProgress(detail, index);
+                      },
+                      itemBuilder: (_, index) => KathaNetworkImage(
+                        url: detail.photos[index].imageUrl,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                    const DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Color(0xAA000000),
+                            Colors.transparent,
+                            Color(0xCC000000),
+                          ],
+                          stops: [0, .42, 1],
+                        ),
+                      ),
+                      child: SizedBox.expand(),
+                    ),
+                    SafeArea(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          children: [
+                            _PhotoProgress(
+                              count: detail.photos.length,
+                              activeIndex: _index,
+                            ),
+                            const SizedBox(height: 14),
+                            Row(
+                              children: [
+                                _RoundIconButton(
+                                  icon: Icons.close_rounded,
+                                  onTap: () => Navigator.of(context).pop(),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    'Day ${detail.day.dayNumber}: ${detail.day.title}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const Spacer(),
+                            _ReaderBottomPanel(
+                              photoIndex: _index,
+                              totalPhotos: detail.photos.length,
+                              isFinalPhoto: isFinalPhoto,
+                              hasQuestions: detail.questions.isNotEmpty,
+                              onNext: () {
+                                if (isFinalPhoto) {
+                                  detail.questions.isEmpty
+                                      ? _finishDayWithoutQuiz(detail)
+                                      : _openQuiz(detail);
+                                } else {
+                                  _controller.nextPage(
+                                    duration: const Duration(milliseconds: 250),
+                                    curve: Curves.easeOut,
+                                  );
+                                }
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class QuizFlowScreen extends StatefulWidget {
+  const QuizFlowScreen({
+    super.key,
+    required this.day,
+    required this.detail,
+    required this.userApi,
+    required this.onFinished,
+  });
+
+  final StoryDaySummary day;
+  final DayDetail detail;
+  final UserApiService userApi;
+  final VoidCallback onFinished;
 
   @override
   State<QuizFlowScreen> createState() => _QuizFlowScreenState();
 }
 
 class _QuizFlowScreenState extends State<QuizFlowScreen> {
+  final Map<String, QuizOption> _selectedOptions = {};
+  late final DateTime _startedAt = DateTime.now();
   int _index = 0;
-  int _score = 0;
-  int? _selected;
+  bool _submitting = false;
+  String? _error;
+
+  QuizQuestion get _question => widget.detail.questions[_index];
+  bool get _allAnswered =>
+      _selectedOptions.length == widget.detail.questions.length;
+
+  Future<void> _submit() async {
+    if (!_allAnswered || _submitting) return;
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+
+    try {
+      final result = await widget.userApi.submitQuizAttempt(
+        storyDayId: widget.detail.day.id,
+        startedAt: _startedAt,
+        timeSpentSeconds: DateTime.now().difference(_startedAt).inSeconds,
+        selectedOptions: _selectedOptions,
+        questions: widget.detail.questions,
+      );
+      await widget.userApi.completeDay(widget.detail.day.id);
+      if (!mounted) return;
+      widget.onFinished();
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute<void>(
+          builder: (_) =>
+              CompletionRewardScreen(day: widget.day, result: result),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _error = '$error');
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final question = _questions[_index];
-    final answered = _selected != null;
-    final correct = _selected == question.correctIndex;
-
+    final selected = _selectedOptions[_question.id];
     return Scaffold(
-      appBar: AppBar(title: const Text('ఈరోజు Quiz')),
+      appBar: AppBar(title: const Text('Today Quiz')),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(20),
           child: Column(
             children: [
               Text(
-                'Question ${_index + 1} of ${_questions.length}',
+                'Question ${_index + 1} of ${widget.detail.questions.length}',
                 style: const TextStyle(
                   color: AppColors.mutedBrown,
                   fontWeight: FontWeight.w900,
@@ -1119,7 +1405,7 @@ class _QuizFlowScreenState extends State<QuizFlowScreen> {
               ),
               const SizedBox(height: 10),
               LinearProgressIndicator(
-                value: (_index + 1) / _questions.length,
+                value: (_index + 1) / widget.detail.questions.length,
                 minHeight: 8,
                 borderRadius: BorderRadius.circular(999),
                 color: AppColors.gold,
@@ -1130,7 +1416,7 @@ class _QuizFlowScreenState extends State<QuizFlowScreen> {
                 child: Padding(
                   padding: const EdgeInsets.all(24),
                   child: Text(
-                    question.text,
+                    _question.questionText,
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.headlineMedium,
                   ),
@@ -1139,54 +1425,65 @@ class _QuizFlowScreenState extends State<QuizFlowScreen> {
               const SizedBox(height: 18),
               Expanded(
                 child: ListView.separated(
-                  itemCount: question.options.length,
+                  itemCount: _question.options.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 12),
                   itemBuilder: (context, optionIndex) {
+                    final option = _question.options[optionIndex];
                     return _QuizOptionTile(
-                      label: String.fromCharCode(65 + optionIndex),
-                      text: question.options[optionIndex],
-                      selected: _selected == optionIndex,
-                      answered: answered,
-                      correct: optionIndex == question.correctIndex,
-                      onTap: () {
-                        if (answered) return;
-                        setState(() {
-                          _selected = optionIndex;
-                          if (optionIndex == question.correctIndex) _score += 1;
-                        });
-                      },
+                      label: option.label.isEmpty
+                          ? String.fromCharCode(65 + optionIndex)
+                          : option.label,
+                      text: option.text,
+                      selected: selected?.id == option.id,
+                      onTap: () => setState(
+                        () => _selectedOptions[_question.id] = option,
+                      ),
                     );
                   },
                 ),
               ),
-              if (answered)
-                Text(
-                  correct ? 'సరైన సమాధానం' : 'తప్పు సమాధానం',
-                  style: TextStyle(
-                    color: correct ? AppColors.success : AppColors.error,
-                    fontWeight: FontWeight.w900,
-                    fontSize: 16,
+              if (_error != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Text(
+                    _error!,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: AppColors.error,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                 ),
-              const SizedBox(height: 12),
-              FilledButton(
-                onPressed: !answered
-                    ? null
-                    : () {
-                        if (_index == _questions.length - 1) {
-                          widget.onComplete(_score, _questions.length);
-                        } else {
-                          setState(() {
-                            _index += 1;
-                            _selected = null;
-                          });
-                        }
-                      },
-                child: Text(
-                  _index == _questions.length - 1
-                      ? 'Quiz పూర్తి చేయండి'
-                      : 'తర్వాతి ప్రశ్న',
-                ),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _index == 0
+                          ? null
+                          : () => setState(() => _index -= 1),
+                      child: const Text('Previous'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _submitting
+                          ? null
+                          : _index == widget.detail.questions.length - 1
+                          ? (_allAnswered ? _submit : null)
+                          : selected == null
+                          ? null
+                          : () => setState(() => _index += 1),
+                      child: Text(
+                        _submitting
+                            ? 'Submitting...'
+                            : _index == widget.detail.questions.length - 1
+                            ? 'Submit'
+                            : 'Next',
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -1199,287 +1496,88 @@ class _QuizFlowScreenState extends State<QuizFlowScreen> {
 class CompletionRewardScreen extends StatelessWidget {
   const CompletionRewardScreen({
     super.key,
-    required this.score,
-    required this.total,
-    required this.points,
-    required this.streak,
-    required this.onUnlockCard,
-    required this.onHome,
+    required this.day,
+    required this.result,
   });
 
-  final int score;
-  final int total;
-  final int points;
-  final int streak;
-  final VoidCallback onUnlockCard;
-  final VoidCallback onHome;
+  final StoryDaySummary day;
+  final QuizAttemptResult? result;
 
   @override
   Widget build(BuildContext context) {
-    final earned = 10 + (score == total ? 5 : 0);
+    final quizText = result == null
+        ? 'No quiz'
+        : '${result!.correctCount} / ${result!.totalQuestions}';
     return Scaffold(
       body: SafeArea(
-        child: ListView(
+        child: Padding(
           padding: const EdgeInsets.all(22),
-          children: [
-            const SizedBox(height: 30),
-            const Icon(
-              Icons.workspace_premium_rounded,
-              size: 90,
-              color: AppColors.saffron,
-            ),
-            const SizedBox(height: 18),
-            Text(
-              'Day 5 పూర్తి చేశారు',
-              textAlign: TextAlign.center,
-              style: Theme.of(
-                context,
-              ).textTheme.displaySmall?.copyWith(color: AppColors.deepSaffron),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'అద్భుతం! మీరు విజయవంతంగా కథను పూర్తి చేశారు.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: AppColors.mutedBrown, fontSize: 16),
-            ),
-            const SizedBox(height: 28),
-            Row(
-              children: [
-                Expanded(
-                  child: _RewardTile(
-                    icon: Icons.stars_rounded,
-                    title: '+$earned Points',
-                    label: 'సంపాదించారు',
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _RewardTile(
-                    icon: Icons.local_fire_department_rounded,
-                    title: '$streak Days',
-                    label: 'Streak',
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                Expanded(
-                  child: _RewardTile(
-                    icon: Icons.quiz_rounded,
-                    title: '$score / $total',
-                    label: 'Quiz Score',
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _RewardTile(
-                    icon: Icons.savings_rounded,
-                    title: '$points',
-                    label: 'Total Points',
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 26),
-            const _UnlockedRewardPreview(),
-            const SizedBox(height: 18),
-            const _TomorrowTeaser(),
-            const SizedBox(height: 24),
-            FilledButton.icon(
-              onPressed: onUnlockCard,
-              icon: const Icon(Icons.lock_open_rounded),
-              label: const Text('Card Unlock చేయండి'),
-            ),
-            const SizedBox(height: 10),
-            TextButton(onPressed: onHome, child: const Text('Go to Home')),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class ShareCardScreen extends StatelessWidget {
-  const ShareCardScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Card Unlocked'),
-        leading: IconButton(
-          onPressed: () =>
-              Navigator.of(context).popUntil((route) => route.isFirst),
-          icon: const Icon(Icons.close_rounded),
-        ),
-      ),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(22),
-          children: [
-            Text(
-              'Card Unlocked!',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Share today’s wisdom with your family and friends.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: AppColors.mutedBrown),
-            ),
-            const SizedBox(height: 24),
-            AspectRatio(
-              aspectRatio: 1,
-              child: Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(26),
-                  boxShadow: _softShadow,
-                  image: const DecorationImage(
-                    image: AssetImage('assets/mahabharatam-cover.png'),
-                    fit: BoxFit.cover,
-                  ),
-                ),
-                child: Container(
-                  padding: const EdgeInsets.all(22),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(26),
-                    gradient: const LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Color(0x33000000), Color(0xAA000000)],
+          child: Column(
+            children: [
+              const Spacer(),
+              const Icon(
+                Icons.workspace_premium_rounded,
+                size: 92,
+                color: AppColors.saffron,
+              ),
+              const SizedBox(height: 18),
+              Text(
+                'Day ${day.dayNumber} Completed',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.displaySmall,
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'Your progress is saved in the database.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: AppColors.mutedBrown),
+              ),
+              const SizedBox(height: 28),
+              Row(
+                children: [
+                  Expanded(
+                    child: _RewardTile(
+                      icon: Icons.quiz_rounded,
+                      title: quizText,
+                      label: 'Quiz Score',
                     ),
                   ),
-                  child: const Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _BrandBadge(),
-                      Spacer(),
-                      Center(
-                        child: Text(
-                          'ధర్మమే జయం',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 34,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                      ),
-                    ],
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _RewardTile(
+                      icon: Icons.stars_rounded,
+                      title: '+${result?.pointsAdded ?? 0}',
+                      label: 'Quiz Points',
+                    ),
                   ),
-                ),
+                ],
               ),
-            ),
-            const SizedBox(height: 24),
-            FilledButton.icon(
-              onPressed: () {},
-              icon: const Icon(Icons.download_rounded),
-              label: const Text('Save to Gallery'),
-            ),
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                Expanded(
-                  child: _SocialButton(
-                    label: 'WhatsApp',
-                    icon: Icons.chat_rounded,
-                    color: const Color(0xFF128C7E),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _SocialButton(
-                    label: 'Insta Story',
-                    icon: Icons.photo_camera_rounded,
-                    color: const Color(0xFFBC1888),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            TextButton.icon(
-              onPressed: () {},
-              icon: const Icon(Icons.share_rounded),
-              label: const Text('More Options'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class LibraryScreen extends StatelessWidget {
-  const LibraryScreen({super.key, required this.onOpenJourney});
-
-  final VoidCallback onOpenJourney;
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      bottom: false,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
-        children: [
-          Text('Kathalu', style: Theme.of(context).textTheme.displaySmall),
-          const SizedBox(height: 8),
-          const Text(
-            'అన్ని story worlds ఒకే చోట',
-            style: TextStyle(color: AppColors.mutedBrown, fontSize: 16),
+              const Spacer(),
+              FilledButton.icon(
+                onPressed: () =>
+                    Navigator.of(context).popUntil((route) => route.isFirst),
+                icon: const Icon(Icons.home_rounded),
+                label: const Text('Back Home'),
+              ),
+            ],
           ),
-          const SizedBox(height: 24),
-          for (final section in _librarySections) ...[
-            _SectionTitle(title: section.$1, action: ''),
-            const SizedBox(height: 12),
-            ...section.$2.map(
-              (title) => Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: _LibraryRow(title: title, onTap: onOpenJourney),
-              ),
-            ),
-            const SizedBox(height: 12),
-          ],
-        ],
+        ),
       ),
     );
   }
 }
 
 class CardsScreen extends StatelessWidget {
-  const CardsScreen({super.key, required this.cardUnlocked});
-
-  final bool cardUnlocked;
+  const CardsScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
+    return const SafeArea(
       bottom: false,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
-        children: [
-          Text('Cards', style: Theme.of(context).textTheme.displaySmall),
-          const SizedBox(height: 8),
-          const Text(
-            'మీరు unlock చేసిన devotional share cards',
-            style: TextStyle(color: AppColors.mutedBrown),
-          ),
-          const SizedBox(height: 22),
-          GridView.builder(
-            itemCount: 6,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-              childAspectRatio: .76,
-            ),
-            itemBuilder: (context, index) =>
-                _SavedCardPreview(locked: index > 1 && !cardUnlocked),
-          ),
-        ],
+      child: EmptyState(
+        icon: Icons.style_rounded,
+        title: 'Cards coming later',
+        message: 'This screen is not part of the current dynamic pass.',
       ),
     );
   }
@@ -1488,24 +1586,30 @@ class CardsScreen extends StatelessWidget {
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({
     super.key,
-    required this.points,
-    required this.streak,
-    required this.completedDays,
+    required this.user,
+    required this.summary,
+    required this.badges,
   });
 
-  final int points;
-  final int streak;
-  final int completedDays;
+  final AppUser? user;
+  final ProfileSummary summary;
+  final List<EarnedBadge> badges;
 
   @override
   Widget build(BuildContext context) {
+    final displayName = user?.name?.isNotEmpty == true
+        ? user!.name!
+        : (user?.phoneNumber.isNotEmpty == true
+              ? user!.phoneNumber
+              : 'Daily Katha User');
+
     return SafeArea(
       bottom: false,
       child: ListView(
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 110),
         children: [
           Text(
-            'మీ ప్రొఫైల్',
+            'My Profile',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.displaySmall,
           ),
@@ -1521,7 +1625,7 @@ class ProfileScreen extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            'Srinivas',
+            displayName,
             textAlign: TextAlign.center,
             style: Theme.of(
               context,
@@ -1534,56 +1638,46 @@ class ProfileScreen extends StatelessWidget {
             physics: const NeverScrollableScrollPhysics(),
             crossAxisSpacing: 12,
             mainAxisSpacing: 12,
-            childAspectRatio: 1.12,
+            childAspectRatio: .95,
             children: [
               _ProfileStat(
                 icon: Icons.star_rounded,
-                value: '$points',
+                value: '${user?.points ?? 0}',
                 label: 'Points',
               ),
               _ProfileStat(
                 icon: Icons.local_fire_department_rounded,
-                value: '$streak Days',
+                value: '${user?.currentStreak ?? 0} Days',
                 label: 'Streak',
               ),
               _ProfileStat(
                 icon: Icons.menu_book_rounded,
-                value: '$completedDays',
+                value: '${summary.completedStories}',
                 label: 'Completed Stories',
               ),
-              const _ProfileStat(
-                icon: Icons.track_changes_rounded,
-                value: '85%',
-                label: 'Accuracy',
+              _ProfileStat(
+                icon: Icons.emoji_events_rounded,
+                value: '${user?.highestStreak ?? 0} Days',
+                label: 'Highest Streak',
               ),
             ],
           ),
           const SizedBox(height: 24),
           _SectionTitle(title: 'Badges', action: ''),
           const SizedBox(height: 12),
-          const Row(
-            children: [
-              _Badge(label: 'Early Bird', active: true),
-              SizedBox(width: 14),
-              _Badge(label: 'Scholar', active: false),
-              SizedBox(width: 14),
-              _Badge(label: 'Wise', active: false),
-            ],
-          ),
-          const SizedBox(height: 24),
-          _SectionTitle(title: 'Reminder Settings', action: ''),
-          const SizedBox(height: 12),
-          Card(
-            child: ListTile(
-              leading: const Icon(
-                Icons.notifications_rounded,
-                color: AppColors.deepSaffron,
-              ),
-              title: const Text('Daily Katha Time'),
-              subtitle: const Text('06:30 AM'),
-              trailing: Switch(value: true, onChanged: (_) {}),
+          if (badges.isEmpty)
+            const Text(
+              'No badges earned yet.',
+              style: TextStyle(color: AppColors.mutedBrown),
+            )
+          else
+            Wrap(
+              spacing: 14,
+              runSpacing: 14,
+              children: badges
+                  .map((badge) => _Badge(label: badge.name))
+                  .toList(),
             ),
-          ),
         ],
       ),
     );
@@ -1636,74 +1730,10 @@ class _Keypad extends StatelessWidget {
   }
 }
 
-class _InterestTile extends StatelessWidget {
-  const _InterestTile({
-    required this.title,
-    required this.icon,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String title;
-  final IconData icon;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: selected ? const Color(0xFFFFE7C7) : Colors.white,
-      borderRadius: BorderRadius.circular(22),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(22),
-        child: Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(22),
-            border: Border.all(
-              color: selected ? AppColors.saffron : AppColors.border,
-            ),
-            boxShadow: selected ? _softShadow : null,
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Align(
-                alignment: Alignment.topRight,
-                child: Icon(
-                  selected
-                      ? Icons.check_circle_rounded
-                      : Icons.radio_button_unchecked_rounded,
-                  color: selected ? AppColors.deepSaffron : AppColors.border,
-                  size: 20,
-                ),
-              ),
-              const Spacer(),
-              Icon(icon, color: AppColors.deepSaffron, size: 36),
-              const SizedBox(height: 12),
-              Text(
-                title,
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w900,
-                  fontSize: 16,
-                ),
-              ),
-              const Spacer(),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _TodayHero extends StatelessWidget {
-  const _TodayHero({required this.onStart});
+  const _TodayHero({required this.story, required this.onStart});
 
+  final Story story;
   final VoidCallback onStart;
 
   @override
@@ -1712,65 +1742,61 @@ class _TodayHero extends StatelessWidget {
       onTap: onStart,
       child: AspectRatio(
         aspectRatio: .82,
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(26),
-            boxShadow: _softShadow,
-            image: const DecorationImage(
-              image: AssetImage('assets/mahabharatam-cover.png'),
-              fit: BoxFit.cover,
-            ),
-          ),
-          child: Container(
-            padding: const EdgeInsets.all(22),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(26),
-              gradient: const LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Color(0x33000000), Color(0xEE000000)],
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(26),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              KathaNetworkImage(url: story.coverImageUrl),
+              const DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Color(0x33000000), Color(0xEE000000)],
+                  ),
+                ),
               ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: const [
-                    _DarkPill(label: 'మహాభారతం'),
-                    SizedBox(width: 8),
-                    _DarkPill(
-                      label: '5 నిమిషాలు',
-                      icon: Icons.schedule_rounded,
+              Padding(
+                padding: const EdgeInsets.all(22),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _DarkPill(label: story.categoryName),
+                    const Spacer(),
+                    Text(
+                      story.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 32,
+                        height: 1.15,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    if (story.description.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        story.description,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          height: 1.45,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 18),
+                    FilledButton.icon(
+                      onPressed: onStart,
+                      icon: const Icon(Icons.play_circle_fill_rounded),
+                      label: const Text('Start Story'),
                     ),
                   ],
                 ),
-                const Spacer(),
-                const Text(
-                  'కురుక్షేత్రం - Day 5',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 32,
-                    height: 1.15,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'యుద్ధభూమిలో అర్జునుడి విషాదం, కృష్ణుడి గీతోపదేశం ప్రారంభం...',
-                  style: TextStyle(
-                    color: Colors.white70,
-                    height: 1.45,
-                    fontSize: 16,
-                  ),
-                ),
-                const SizedBox(height: 18),
-                FilledButton.icon(
-                  onPressed: onStart,
-                  icon: const Icon(Icons.play_circle_fill_rounded),
-                  label: const Text('కథ ప్రారంభించండి'),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
@@ -1780,145 +1806,87 @@ class _TodayHero extends StatelessWidget {
 
 class _JourneyMiniCard extends StatelessWidget {
   const _JourneyMiniCard({
-    required this.title,
-    required this.subtitle,
+    required this.story,
     required this.progress,
-    required this.color,
+    required this.onTap,
   });
 
-  final String title;
-  final String subtitle;
+  final Story story;
   final double progress;
-  final Color color;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 248,
-      margin: const EdgeInsets.only(right: 14),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: AppColors.border.withValues(alpha: .5)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 54,
-                height: 54,
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: .12),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Icon(Icons.menu_book_rounded, color: color),
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(22),
+      child: Container(
+        width: 248,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: AppColors.border.withValues(alpha: .5)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              story.categoryName,
+              style: const TextStyle(
+                color: AppColors.deepSaffron,
+                fontWeight: FontWeight.w900,
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        color: color,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    Text(
-                      subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const Spacer(),
-          LinearProgressIndicator(
-            value: progress,
-            color: color,
-            backgroundColor: const Color(0xFFFFE7C7),
-            borderRadius: BorderRadius.circular(99),
-          ),
-        ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              story.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const Spacer(),
+            LinearProgressIndicator(
+              value: progress,
+              color: AppColors.deepSaffron,
+              backgroundColor: const Color(0xFFFFE7C7),
+              borderRadius: BorderRadius.circular(99),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
-class _MoralCard extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFEFD2),
-        borderRadius: BorderRadius.circular(22),
-        border: const Border(left: BorderSide(color: AppColors.gold, width: 5)),
-      ),
-      child: const Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.format_quote_rounded, color: AppColors.deepSaffron),
-              SizedBox(width: 8),
-              Text(
-                'నేటి సూక్తి',
-                style: TextStyle(
-                  color: AppColors.mutedBrown,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ],
-          ),
-          SizedBox(height: 12),
-          Text(
-            '"కర్మణ్యేవాధికారస్తే మా ఫలేషు కదాచన"',
-            style: TextStyle(
-              fontSize: 20,
-              height: 1.4,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          SizedBox(height: 8),
-          Text(
-            'కర్మ చేయడంలోనే నీకు అధికారం ఉంది, ఫలితంపై కాదు.',
-            style: TextStyle(color: AppColors.mutedBrown, height: 1.45),
-          ),
-        ],
-      ),
-    );
-  }
-}
+class _LibraryRow extends StatelessWidget {
+  const _LibraryRow({required this.story, required this.onTap});
 
-class _StoryVisual extends StatelessWidget {
-  const _StoryVisual({required this.slide});
-
-  final _Slide slide;
+  final Story story;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        Image.asset('assets/mahabharatam-cover.png', fit: BoxFit.cover),
-        DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: RadialGradient(
-              center: slide.alignment,
-              radius: .95,
-              colors: [slide.color.withValues(alpha: .44), Colors.transparent],
-            ),
+    return Card(
+      child: ListTile(
+        onTap: onTap,
+        leading: ClipRRect(
+          borderRadius: BorderRadius.circular(14),
+          child: SizedBox(
+            width: 58,
+            height: 58,
+            child: KathaNetworkImage(url: story.coverImageUrl),
           ),
         ),
-      ],
+        title: Text(
+          story.title,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontWeight: FontWeight.w900),
+        ),
+        subtitle: Text('${story.days.length} published days'),
+        trailing: const Icon(Icons.chevron_right_rounded),
+      ),
     );
   }
 }
@@ -1926,18 +1894,14 @@ class _StoryVisual extends StatelessWidget {
 class _DayTimelineTile extends StatelessWidget {
   const _DayTimelineTile({
     required this.day,
-    required this.title,
     required this.completed,
     required this.current,
-    required this.locked,
     this.onTap,
   });
 
-  final int day;
-  final String title;
+  final StoryDaySummary day;
   final bool completed;
   final bool current;
-  final bool locked;
   final VoidCallback? onTap;
 
   @override
@@ -1954,20 +1918,112 @@ class _DayTimelineTile extends StatelessWidget {
           child: Icon(
             completed
                 ? Icons.check_circle_rounded
-                : locked
-                ? Icons.lock_rounded
-                : Icons.play_arrow_rounded,
+                : current
+                ? Icons.play_arrow_rounded
+                : Icons.lock_rounded,
           ),
         ),
         title: Text(
-          'Day $day',
+          'Day ${day.dayNumber}',
           style: const TextStyle(
             color: AppColors.deepSaffron,
             fontWeight: FontWeight.w900,
           ),
         ),
-        subtitle: Text(title),
+        subtitle: Text(day.title.isEmpty ? 'Daily Katha' : day.title),
         trailing: current ? const Chip(label: Text('Current')) : null,
+      ),
+    );
+  }
+}
+
+class _PhotoProgress extends StatelessWidget {
+  const _PhotoProgress({required this.count, required this.activeIndex});
+
+  final int count;
+  final int activeIndex;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: List.generate(count, (index) {
+        return Expanded(
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            height: 4,
+            margin: EdgeInsets.only(right: index == count - 1 ? 0 : 6),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(999),
+              color: index <= activeIndex
+                  ? Colors.white
+                  : Colors.white.withValues(alpha: 0.34),
+            ),
+          ),
+        );
+      }),
+    );
+  }
+}
+
+class _ReaderBottomPanel extends StatelessWidget {
+  const _ReaderBottomPanel({
+    required this.photoIndex,
+    required this.totalPhotos,
+    required this.isFinalPhoto,
+    required this.hasQuestions,
+    required this.onNext,
+  });
+
+  final int photoIndex;
+  final int totalPhotos;
+  final bool isFinalPhoto;
+  final bool hasQuestions;
+  final VoidCallback onNext;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppColors.ivory.withValues(alpha: .96),
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'Photo ${photoIndex + 1} of $totalPhotos',
+            style: const TextStyle(
+              color: AppColors.deepSaffron,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            isFinalPhoto
+                ? hasQuestions
+                      ? 'Story completed. Continue to quiz.'
+                      : 'Story completed. No quiz is assigned for this day.'
+                : 'Continue to the next photo.',
+            style: Theme.of(context).textTheme.bodyLarge,
+          ),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            onPressed: onNext,
+            icon: Icon(
+              isFinalPhoto ? Icons.quiz_rounded : Icons.arrow_forward_rounded,
+            ),
+            label: Text(
+              isFinalPhoto
+                  ? hasQuestions
+                        ? 'Start Quiz'
+                        : 'Complete Day'
+                  : 'Next Photo',
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1978,33 +2034,18 @@ class _QuizOptionTile extends StatelessWidget {
     required this.label,
     required this.text,
     required this.selected,
-    required this.answered,
-    required this.correct,
     required this.onTap,
   });
 
   final String label;
   final String text;
   final bool selected;
-  final bool answered;
-  final bool correct;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final showCorrect = answered && correct;
-    final showWrong = answered && selected && !correct;
-    final color = showCorrect
-        ? AppColors.success
-        : showWrong
-        ? AppColors.error
-        : AppColors.brown;
     return Material(
-      color: showCorrect
-          ? const Color(0xFFEAF7EF)
-          : showWrong
-          ? const Color(0xFFFFEEEE)
-          : Colors.white,
+      color: selected ? const Color(0xFFFFF1E6) : Colors.white,
       borderRadius: BorderRadius.circular(18),
       child: InkWell(
         onTap: onTap,
@@ -2014,7 +2055,7 @@ class _QuizOptionTile extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(18),
             border: Border.all(
-              color: showCorrect || showWrong ? color : AppColors.border,
+              color: selected ? AppColors.saffron : AppColors.border,
             ),
           ),
           child: Row(
@@ -2033,25 +2074,106 @@ class _QuizOptionTile extends StatelessWidget {
               Expanded(
                 child: Text(
                   text,
-                  style: TextStyle(
-                    color: color,
+                  style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
               ),
               Icon(
-                showCorrect
+                selected
                     ? Icons.check_circle_rounded
-                    : showWrong
-                    ? Icons.cancel_rounded
                     : Icons.radio_button_unchecked_rounded,
-                color: color,
+                color: selected ? AppColors.saffron : AppColors.mutedBrown,
               ),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+class _ProfileStat extends StatelessWidget {
+  const _ProfileStat({
+    required this.icon,
+    required this.value,
+    required this.label,
+  });
+
+  final IconData icon;
+  final String value;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: AppColors.saffron, size: 32),
+            const SizedBox(height: 12),
+            Text(
+              value,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w900,
+                color: AppColors.mutedBrown,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Flexible(
+              child: Text(
+                label,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: AppColors.mutedBrown,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _Badge extends StatelessWidget {
+  const _Badge({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const CircleAvatar(
+          radius: 28,
+          backgroundColor: Color(0xFFFFE7B3),
+          child: Icon(
+            Icons.workspace_premium_rounded,
+            color: AppColors.deepSaffron,
+          ),
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: 82,
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -2079,10 +2201,7 @@ class _RewardTile extends StatelessWidget {
             Text(
               title,
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontWeight: FontWeight.w900,
-                color: AppColors.deepSaffron,
-              ),
+              style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
             ),
             const SizedBox(height: 4),
             Text(
@@ -2090,303 +2209,11 @@ class _RewardTile extends StatelessWidget {
               textAlign: TextAlign.center,
               style: const TextStyle(
                 color: AppColors.mutedBrown,
-                fontSize: 12,
                 fontWeight: FontWeight.w800,
               ),
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _UnlockedRewardPreview extends StatelessWidget {
-  const _UnlockedRewardPreview();
-
-  @override
-  Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(24),
-      child: AspectRatio(
-        aspectRatio: 16 / 10,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            Image.asset('assets/mahabharatam-cover.png', fit: BoxFit.cover),
-            const DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Colors.transparent, Color(0xCC000000)],
-                ),
-              ),
-            ),
-            const Positioned(
-              left: 18,
-              right: 18,
-              bottom: 18,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'New Reward Unlocked',
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  SizedBox(height: 4),
-                  Text(
-                    'Daily Darshan Card',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 22,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _TomorrowTeaser extends StatelessWidget {
-  const _TomorrowTeaser();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFE7B3),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: const Row(
-        children: [
-          Icon(Icons.calendar_today_rounded, color: AppColors.deepSaffron),
-          SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'రేపు',
-                  style: TextStyle(
-                    color: AppColors.deepSaffron,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                Text(
-                  'భీష్ముని గొప్ప ప్రతిజ్ఞ',
-                  style: TextStyle(fontWeight: FontWeight.w800),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SmallSharePreview extends StatelessWidget {
-  const _SmallSharePreview({required this.title});
-
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    return AspectRatio(
-      aspectRatio: .82,
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18),
-          image: const DecorationImage(
-            image: AssetImage('assets/mahabharatam-cover.png'),
-            fit: BoxFit.cover,
-          ),
-        ),
-        child: Align(
-          alignment: Alignment.bottomCenter,
-          child: Text(
-            title,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _LibraryRow extends StatelessWidget {
-  const _LibraryRow({required this.title, required this.onTap});
-
-  final String title;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: ListTile(
-        onTap: onTap,
-        leading: ClipRRect(
-          borderRadius: BorderRadius.circular(14),
-          child: Image.asset(
-            'assets/mahabharatam-cover.png',
-            width: 58,
-            height: 58,
-            fit: BoxFit.cover,
-          ),
-        ),
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w900)),
-        subtitle: const Text('Daily story journey'),
-        trailing: const Icon(Icons.chevron_right_rounded),
-      ),
-    );
-  }
-}
-
-class _SavedCardPreview extends StatelessWidget {
-  const _SavedCardPreview({required this.locked});
-
-  final bool locked;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        image: const DecorationImage(
-          image: AssetImage('assets/mahabharatam-cover.png'),
-          fit: BoxFit.cover,
-        ),
-      ),
-      child: Container(
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          color: locked
-              ? Colors.black.withValues(alpha: .45)
-              : Colors.transparent,
-        ),
-        child: locked
-            ? const Icon(Icons.lock_rounded, color: Colors.white, size: 34)
-            : const Text(
-                'ధర్మమే జయం',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 20,
-                ),
-              ),
-      ),
-    );
-  }
-}
-
-class _ProfileStat extends StatelessWidget {
-  const _ProfileStat({
-    required this.icon,
-    required this.value,
-    required this.label,
-  });
-
-  final IconData icon;
-  final String value;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, color: AppColors.saffron, size: 34),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: AppColors.mutedBrown,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _Badge extends StatelessWidget {
-  const _Badge({required this.label, required this.active});
-
-  final String label;
-  final bool active;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        CircleAvatar(
-          radius: 30,
-          backgroundColor: active
-              ? const Color(0xFFFFE7B3)
-              : const Color(0xFFFFF1E6),
-          child: Icon(
-            Icons.workspace_premium_rounded,
-            color: active ? AppColors.deepSaffron : AppColors.border,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          label,
-          style: TextStyle(
-            color: active ? AppColors.brown : AppColors.mutedBrown,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _RoundIconButton extends StatelessWidget {
-  const _RoundIconButton({required this.icon, required this.onTap});
-
-  final IconData icon;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(99),
-      child: Container(
-        width: 42,
-        height: 42,
-        decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: .28),
-          shape: BoxShape.circle,
-        ),
-        child: Icon(icon, color: Colors.white),
       ),
     );
   }
@@ -2406,17 +2233,44 @@ class _MetricPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: const Color(0xFFFFE7B3),
+        color: color.withValues(alpha: .16),
         borderRadius: BorderRadius.circular(99),
       ),
       child: Row(
         children: [
-          Text(label, style: const TextStyle(fontWeight: FontWeight.w900)),
-          const SizedBox(width: 4),
           Icon(icon, size: 18, color: color),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(color: color, fontWeight: FontWeight.w900),
+          ),
         ],
+      ),
+    );
+  }
+}
+
+class _RoundIconButton extends StatelessWidget {
+  const _RoundIconButton({required this.icon, required this.onTap});
+
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(999),
+      child: Container(
+        width: 50,
+        height: 50,
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: .38),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(icon, color: Colors.white),
       ),
     );
   }
@@ -2448,29 +2302,10 @@ class _SectionTitle extends StatelessWidget {
   }
 }
 
-class _WorldChip extends StatelessWidget {
-  const _WorldChip({required this.label, required this.icon});
-
-  final String label;
-  final IconData icon;
-
-  @override
-  Widget build(BuildContext context) {
-    return Chip(
-      avatar: Icon(icon, color: AppColors.deepSaffron, size: 18),
-      label: Text(label, style: const TextStyle(fontWeight: FontWeight.w800)),
-      backgroundColor: Colors.white,
-      side: const BorderSide(color: AppColors.border),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-    );
-  }
-}
-
 class _DarkPill extends StatelessWidget {
-  const _DarkPill({required this.label, this.icon});
+  const _DarkPill({required this.label});
 
   final String label;
-  final IconData? icon;
 
   @override
   Widget build(BuildContext context) {
@@ -2481,202 +2316,32 @@ class _DarkPill extends StatelessWidget {
         borderRadius: BorderRadius.circular(99),
         border: Border.all(color: Colors.white24),
       ),
-      child: Row(
-        children: [
-          if (icon != null) ...[
-            Icon(icon, color: Colors.white, size: 14),
-            const SizedBox(width: 4),
-          ],
-          Text(
-            label,
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w900,
-              fontSize: 12,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _BrandBadge extends StatelessWidget {
-  const _BrandBadge();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: .22),
-        borderRadius: BorderRadius.circular(99),
-        border: Border.all(color: Colors.white30),
-      ),
-      child: const Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            Icons.local_fire_department_rounded,
-            color: AppColors.gold,
-            size: 17,
-          ),
-          SizedBox(width: 5),
-          Text(
-            'DAILY KATHA',
-            style: TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w900,
-              fontSize: 12,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SocialButton extends StatelessWidget {
-  const _SocialButton({
-    required this.label,
-    required this.icon,
-    required this.color,
-  });
-
-  final String label;
-  final IconData icon;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return OutlinedButton(
-      onPressed: () {},
-      style: OutlinedButton.styleFrom(
-        minimumSize: const Size.fromHeight(86),
-        foregroundColor: color,
-        side: BorderSide(color: color.withValues(alpha: .35)),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, color: color),
-          const SizedBox(height: 6),
-          Text(label),
-        ],
-      ),
-    );
-  }
-}
-
-class _ProgressLine extends StatelessWidget {
-  const _ProgressLine();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 110,
-      height: 5,
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFE7B3),
-        borderRadius: BorderRadius.circular(99),
-      ),
-      alignment: Alignment.centerLeft,
-      child: FractionallySizedBox(
-        widthFactor: .36,
-        child: Container(
-          decoration: BoxDecoration(
-            color: AppColors.deepSaffron,
-            borderRadius: BorderRadius.circular(99),
-          ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w900,
+          fontSize: 12,
         ),
       ),
     );
   }
 }
 
-class _Slide {
-  const _Slide(this.title, this.body, this.color, this.alignment);
-
-  final String title;
-  final String body;
-  final Color color;
-  final Alignment alignment;
+StoryDaySummary? _firstIncompleteDay(Story story, Set<String> completedIds) {
+  for (final day in story.days) {
+    if (!completedIds.contains(day.id)) return day;
+  }
+  return story.days.isEmpty ? null : story.days.last;
 }
 
-class _Question {
-  const _Question(this.text, this.options, this.correctIndex);
-
-  final String text;
-  final List<String> options;
-  final int correctIndex;
+double _storyProgressFraction(Story story, UserProgress progress) {
+  if (story.days.isEmpty) return 0;
+  final completedCount = progress.kathaProgress
+      .where((item) => item.storyId == story.id && item.completed)
+      .length;
+  return (completedCount / story.days.length).clamp(0, 1);
 }
-
-const _slides = [
-  _Slide(
-    'ధర్మం మొదలైన క్షణం',
-    'కురుక్షేత్ర యుద్ధభూమిలో అర్జునుడు తన మనసులో గందరగోళాన్ని అనుభవించాడు.',
-    AppColors.gold,
-    Alignment.topCenter,
-  ),
-  _Slide(
-    'అర్జునుడి సందేహం',
-    'తన బంధువులను చూసి అతని చేతులు వణికాయి. యుద్ధం సరైనదా అని ప్రశ్నించాడు.',
-    AppColors.saffron,
-    Alignment.centerLeft,
-  ),
-  _Slide(
-    'కృష్ణుడి మాట',
-    'కృష్ణుడు ధర్మం కోసం తీసుకునే నిర్ణయం కఠినమైనదైనా అవసరమని వివరించాడు.',
-    AppColors.deepSaffron,
-    Alignment.centerRight,
-  ),
-  _Slide(
-    'జీవిత పాఠం',
-    'భయం వచ్చినప్పుడు కూడా మన కర్తవ్యాన్ని స్పష్టంగా చూడటం నేర్చుకోవాలి.',
-    AppColors.maroon,
-    Alignment.bottomCenter,
-  ),
-];
-
-const _questions = [
-  _Question('అర్జునుడి రథానికి సారథి ఎవరు?', [
-    'భీష్ముడు',
-    'శ్రీకృష్ణుడు',
-    'ద్రోణుడు',
-    'కర్ణుడు',
-  ], 1),
-  _Question('కురుక్షేత్రంలో అర్జునుడు మొదట ఏమి అనుభవించాడు?', [
-    'సంతోషం',
-    'గందరగోళం',
-    'కోపం',
-    'నిద్ర',
-  ], 1),
-  _Question('ఈ కథలో ప్రధానమైన పాఠం ఏమిటి?', [
-    'ధర్మం వైపు నిలవాలి',
-    'యుద్ధం మాత్రమే ముఖ్యం',
-    'మాట్లాడకూడదు',
-    'ఎప్పుడూ కోపంగా ఉండాలి',
-  ], 0),
-];
-
-const _dayTitles = [
-  'The Great Story Begins',
-  'Bhishma Pratigya',
-  'Guru Drona',
-  'The Game of Dice',
-  'Kurukshetra Begins',
-  'Arjuna Vishada Yogam',
-  'Krishna’s Teaching',
-];
-
-const _librarySections = [
-  ('Itihasam', ['Mahabharatam 100 Days Journey', 'Ramayanam 60 Days Journey']),
-  ('Puranam', ['Sri Krishna Kathalu', 'Shiva Kathalu', 'Vishnu Avataralu']),
-  ('Bhakti', ['Bhakta Prahlada', 'Annamayya', 'Ramadasu']),
-  ('Temple Stories', ['Tirupati Balaji', 'Srisailam', 'Bhadrachalam']),
-  ('Festival Specials', ['Sri Rama Navami', 'Krishna Janmashtami', 'Diwali']),
-  ('Kids Katha', ['Panchatantra', 'Tenali Ramakrishna', 'Vikram-Betal']),
-];
 
 final _softShadow = [
   BoxShadow(

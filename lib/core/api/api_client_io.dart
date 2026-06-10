@@ -6,9 +6,12 @@ import '../../app/config.dart';
 import '../errors/app_exception.dart';
 
 class ApiClient {
-  ApiClient({String? baseUrl}) : _baseUrl = baseUrl ?? AppConfig.apiBaseUrl;
+  ApiClient({String? baseUrl, String? authToken})
+    : _baseUrl = baseUrl ?? AppConfig.apiBaseUrl,
+      _authToken = authToken;
 
   final String _baseUrl;
+  final String? _authToken;
   final HttpClient _client = HttpClient()
     ..connectionTimeout = const Duration(seconds: 12);
 
@@ -27,9 +30,30 @@ class ApiClient {
     return _send(request);
   }
 
+  Future<Map<String, dynamic>> patchJson(
+    String path,
+    Map<String, dynamic> body,
+  ) async {
+    final request = await _open('PATCH', path);
+    request.headers.contentType = ContentType.json;
+    request.write(jsonEncode(body));
+    return _send(request);
+  }
+
   Future<HttpClientRequest> _open(String method, String path) {
     final uri = Uri.parse('$_baseUrl$path');
-    return _client.openUrl(method, uri).timeout(const Duration(seconds: 12));
+    return _client
+        .openUrl(method, uri)
+        .timeout(const Duration(seconds: 12))
+        .then((request) {
+          if (_authToken != null && _authToken.isNotEmpty) {
+            request.headers.set(
+              HttpHeaders.authorizationHeader,
+              'Bearer $_authToken',
+            );
+          }
+          return request;
+        });
   }
 
   Future<Map<String, dynamic>> _send(HttpClientRequest request) async {

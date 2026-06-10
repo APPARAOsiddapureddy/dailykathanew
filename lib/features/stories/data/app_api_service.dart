@@ -3,7 +3,8 @@ import '../../../core/api/api_client.dart';
 import '../models/story_models.dart';
 
 class AppApiService {
-  AppApiService({ApiClient? client}) : _client = client ?? ApiClient();
+  AppApiService({ApiClient? client, String? authToken})
+    : _client = client ?? ApiClient(authToken: authToken);
 
   final ApiClient _client;
 
@@ -57,6 +58,7 @@ class _DemoContent {
       description:
           'ధర్మం, నిర్ణయం, కుటుంబం, భక్తి గురించి రోజువారీ కథల ప్రయాణం.',
       coverImageUrl: null,
+      categoryName: 'Itihasam',
       days: [
         StoryDaySummary(
           id: 'mahabharatam-day-1',
@@ -75,6 +77,7 @@ class _DemoContent {
       title: 'రామాయణం',
       description: 'శ్రీరాముని జీవితం నుంచి విలువలు, ధైర్యం, ధర్మం.',
       coverImageUrl: null,
+      categoryName: 'Itihasam',
       days: [
         StoryDaySummary(
           id: 'ramayanam-day-1',

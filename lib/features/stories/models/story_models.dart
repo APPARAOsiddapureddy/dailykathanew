@@ -4,6 +4,7 @@ class Story {
     required this.title,
     required this.description,
     required this.coverImageUrl,
+    required this.categoryName,
     required this.days,
   });
 
@@ -11,6 +12,7 @@ class Story {
   final String title;
   final String description;
   final String? coverImageUrl;
+  final String categoryName;
   final List<StoryDaySummary> days;
 
   factory Story.fromJson(Map<String, dynamic> json) {
@@ -28,6 +30,10 @@ class Story {
       title: _readString(json['title'], fallback: 'Untitled Story'),
       description: _readString(json['description']),
       coverImageUrl: _readNullableString(json['coverImageUrl']),
+      categoryName: _readString(
+        _readMap(json['category'])['name'],
+        fallback: 'Stories',
+      ),
       days: days,
     );
   }
