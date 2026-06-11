@@ -5,6 +5,7 @@ class AppUser {
     required this.points,
     required this.currentStreak,
     required this.highestStreak,
+    required this.notificationPreference,
     this.name,
     this.avatarUrl,
   });
@@ -16,6 +17,7 @@ class AppUser {
   final int points;
   final int currentStreak;
   final int highestStreak;
+  final String notificationPreference;
 
   factory AppUser.fromJson(Map<String, dynamic> json) {
     return AppUser(
@@ -26,6 +28,10 @@ class AppUser {
       points: _readInt(json['points']),
       currentStreak: _readInt(json['currentStreak']),
       highestStreak: _readInt(json['highestStreak']),
+      notificationPreference: _readString(
+        json['notificationPreference'],
+        fallback: 'ALL',
+      ),
     );
   }
 
@@ -38,6 +44,7 @@ class AppUser {
       'points': points,
       'currentStreak': currentStreak,
       'highestStreak': highestStreak,
+      'notificationPreference': notificationPreference,
     };
   }
 }
@@ -208,6 +215,104 @@ class QuizAttemptResult {
       correctCount: _readInt(attempt['correctCount']),
       wrongCount: _readInt(attempt['wrongCount']),
       pointsAdded: _readInt(json['pointsAdded']),
+    );
+  }
+}
+
+class QuizReviewResult {
+  const QuizReviewResult({
+    required this.attemptId,
+    required this.score,
+    required this.totalQuestions,
+    required this.correctCount,
+    required this.wrongCount,
+    required this.questions,
+  });
+
+  final String attemptId;
+  final int score;
+  final int totalQuestions;
+  final int correctCount;
+  final int wrongCount;
+  final List<QuizReviewQuestion> questions;
+
+  int get unattemptedCount =>
+      totalQuestions -
+      questions.where((item) => item.selectedOptionId != null).length;
+
+  factory QuizReviewResult.fromJson(Map<String, dynamic> json) {
+    final attempt = _readMap(json['attempt']);
+    final rawQuestions = json['questions'];
+    return QuizReviewResult(
+      attemptId: _readString(attempt['id']),
+      score: _readInt(attempt['score']),
+      totalQuestions: _readInt(attempt['totalQuestions']),
+      correctCount: _readInt(attempt['correctCount']),
+      wrongCount: _readInt(attempt['wrongCount']),
+      questions: rawQuestions is List
+          ? rawQuestions
+                .whereType<Map<String, dynamic>>()
+                .map(QuizReviewQuestion.fromJson)
+                .toList()
+          : const [],
+    );
+  }
+}
+
+class QuizReviewQuestion {
+  const QuizReviewQuestion({
+    required this.id,
+    required this.questionText,
+    required this.order,
+    required this.options,
+    this.selectedOptionId,
+    this.isCorrect,
+  });
+
+  final String id;
+  final String questionText;
+  final int order;
+  final String? selectedOptionId;
+  final bool? isCorrect;
+  final List<QuizReviewOption> options;
+
+  factory QuizReviewQuestion.fromJson(Map<String, dynamic> json) {
+    final rawOptions = json['options'];
+    return QuizReviewQuestion(
+      id: _readString(json['id']),
+      questionText: _readString(json['questionText']),
+      order: _readInt(json['order']),
+      selectedOptionId: _readNullableString(json['selectedOptionId']),
+      isCorrect: json['isCorrect'] is bool ? json['isCorrect'] as bool : null,
+      options: rawOptions is List
+          ? rawOptions
+                .whereType<Map<String, dynamic>>()
+                .map(QuizReviewOption.fromJson)
+                .toList()
+          : const [],
+    );
+  }
+}
+
+class QuizReviewOption {
+  const QuizReviewOption({
+    required this.id,
+    required this.label,
+    required this.text,
+    required this.isCorrect,
+  });
+
+  final String id;
+  final String label;
+  final String text;
+  final bool isCorrect;
+
+  factory QuizReviewOption.fromJson(Map<String, dynamic> json) {
+    return QuizReviewOption(
+      id: _readString(json['id']),
+      label: _readString(json['label']),
+      text: _readString(json['text']),
+      isCorrect: json['isCorrect'] == true,
     );
   }
 }

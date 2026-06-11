@@ -8,6 +8,9 @@ import '../stories/data/app_api_service.dart';
 import '../stories/models/story_models.dart';
 import 'data/user_api_service.dart';
 import 'models/app_user_models.dart';
+import 'screens/profile_settings_screen.dart';
+import 'screens/quiz_flow_screen.dart';
+import 'screens/quiz_review_screen.dart';
 
 class DailyKathaExperience extends StatefulWidget {
   const DailyKathaExperience({super.key});
@@ -173,6 +176,53 @@ class _DailyKathaExperienceState extends State<DailyKathaExperience> {
     );
   }
 
+  Future<void> _openSettings() async {
+    final user = _user;
+    if (user == null) return;
+
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ProfileSettingsScreen(
+          user: user,
+          userApi: _userApi,
+          onUserUpdated: (updatedUser) {
+            setState(() => _user = updatedUser);
+            final session = _session;
+            if (session != null) {
+              UserApiService.saveSession(
+                AppSession(token: session.token, user: updatedUser),
+              );
+            }
+          },
+          onLogout: _logout,
+        ),
+      ),
+    );
+    await _refreshContent();
+  }
+
+  Future<void> _logout() async {
+    await UserApiService.clearSession();
+    if (!mounted) return;
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    setState(() {
+      _session = null;
+      _user = null;
+      _stories = const [];
+      _badges = const [];
+      _progress = UserProgress.empty;
+      _summary = const ProfileSummary(
+        completedStories: 0,
+        answeredQuestions: 0,
+        correctAnswers: 0,
+      );
+      _tabIndex = 0;
+      _otpRequested = false;
+      _profileRequested = false;
+      _newUserName = null;
+    });
+  }
+
   StoryDaySummary? _nextReadableDay(Story story) {
     if (story.days.isEmpty) return null;
     final completedIds = _progress.kathaProgress
@@ -256,6 +306,7 @@ class _DailyKathaExperienceState extends State<DailyKathaExperience> {
       badges: _badges,
       onRetry: _refreshContent,
       onOpenJourney: _openJourney,
+      onOpenSettings: _openSettings,
       onOpenFirstStory: () {
         if (_stories.isEmpty) return;
         final story = _stories.first;
@@ -724,6 +775,7 @@ class MainShell extends StatelessWidget {
     required this.badges,
     required this.onRetry,
     required this.onOpenJourney,
+    required this.onOpenSettings,
     required this.onOpenFirstStory,
   });
 
@@ -738,6 +790,7 @@ class MainShell extends StatelessWidget {
   final List<EarnedBadge> badges;
   final VoidCallback onRetry;
   final ValueChanged<Story> onOpenJourney;
+  final VoidCallback onOpenSettings;
   final VoidCallback onOpenFirstStory;
 
   @override
@@ -762,7 +815,12 @@ class MainShell extends StatelessWidget {
       ),
       LibraryScreen(stories: stories, onOpenJourney: onOpenJourney),
       const CardsScreen(),
-      ProfileScreen(user: user, summary: summary, badges: badges),
+      ProfileScreen(
+        user: user,
+        summary: summary,
+        badges: badges,
+        onOpenSettings: onOpenSettings,
+      ),
     ];
 
     return Scaffold(
@@ -1177,15 +1235,22 @@ class _StoryReaderScreenState extends State<StoryReaderScreen> {
     );
   }
 
-  void _openQuiz(DayDetail detail) {
+  Future<void> _openQuiz(DayDetail detail) async {
+    final existingReview = await widget.userApi.fetchLatestQuizReview(
+      detail.day.id,
+    );
+    if (!mounted) return;
+
     Navigator.of(context).pushReplacement(
       MaterialPageRoute<void>(
-        builder: (_) => QuizFlowScreen(
-          day: widget.day,
-          detail: detail,
-          userApi: widget.userApi,
-          onFinished: widget.onFinished,
-        ),
+        builder: (_) => existingReview == null
+            ? QuizFlowScreen(
+                day: widget.day,
+                detail: detail,
+                userApi: widget.userApi,
+                onFinished: widget.onFinished,
+              )
+            : QuizReviewScreen(review: existingReview, day: widget.day),
       ),
     );
   }
@@ -1325,174 +1390,6 @@ class _StoryReaderScreenState extends State<StoryReaderScreen> {
   }
 }
 
-class QuizFlowScreen extends StatefulWidget {
-  const QuizFlowScreen({
-    super.key,
-    required this.day,
-    required this.detail,
-    required this.userApi,
-    required this.onFinished,
-  });
-
-  final StoryDaySummary day;
-  final DayDetail detail;
-  final UserApiService userApi;
-  final VoidCallback onFinished;
-
-  @override
-  State<QuizFlowScreen> createState() => _QuizFlowScreenState();
-}
-
-class _QuizFlowScreenState extends State<QuizFlowScreen> {
-  final Map<String, QuizOption> _selectedOptions = {};
-  late final DateTime _startedAt = DateTime.now();
-  int _index = 0;
-  bool _submitting = false;
-  String? _error;
-
-  QuizQuestion get _question => widget.detail.questions[_index];
-  bool get _allAnswered =>
-      _selectedOptions.length == widget.detail.questions.length;
-
-  Future<void> _submit() async {
-    if (!_allAnswered || _submitting) return;
-    setState(() {
-      _submitting = true;
-      _error = null;
-    });
-
-    try {
-      final result = await widget.userApi.submitQuizAttempt(
-        storyDayId: widget.detail.day.id,
-        startedAt: _startedAt,
-        timeSpentSeconds: DateTime.now().difference(_startedAt).inSeconds,
-        selectedOptions: _selectedOptions,
-        questions: widget.detail.questions,
-      );
-      await widget.userApi.completeDay(widget.detail.day.id);
-      if (!mounted) return;
-      widget.onFinished();
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute<void>(
-          builder: (_) =>
-              CompletionRewardScreen(day: widget.day, result: result),
-        ),
-      );
-    } catch (error) {
-      if (!mounted) return;
-      setState(() => _error = '$error');
-    } finally {
-      if (mounted) setState(() => _submitting = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final selected = _selectedOptions[_question.id];
-    return Scaffold(
-      appBar: AppBar(title: const Text('Today Quiz')),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            children: [
-              Text(
-                'Question ${_index + 1} of ${widget.detail.questions.length}',
-                style: const TextStyle(
-                  color: AppColors.mutedBrown,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(height: 10),
-              LinearProgressIndicator(
-                value: (_index + 1) / widget.detail.questions.length,
-                minHeight: 8,
-                borderRadius: BorderRadius.circular(999),
-                color: AppColors.gold,
-                backgroundColor: const Color(0xFFFFE7C7),
-              ),
-              const SizedBox(height: 28),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Text(
-                    _question.questionText,
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.headlineMedium,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 18),
-              Expanded(
-                child: ListView.separated(
-                  itemCount: _question.options.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 12),
-                  itemBuilder: (context, optionIndex) {
-                    final option = _question.options[optionIndex];
-                    return _QuizOptionTile(
-                      label: option.label.isEmpty
-                          ? String.fromCharCode(65 + optionIndex)
-                          : option.label,
-                      text: option.text,
-                      selected: selected?.id == option.id,
-                      onTap: () => setState(
-                        () => _selectedOptions[_question.id] = option,
-                      ),
-                    );
-                  },
-                ),
-              ),
-              if (_error != null)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Text(
-                    _error!,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: AppColors.error,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: _index == 0
-                          ? null
-                          : () => setState(() => _index -= 1),
-                      child: const Text('Previous'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: FilledButton(
-                      onPressed: _submitting
-                          ? null
-                          : _index == widget.detail.questions.length - 1
-                          ? (_allAnswered ? _submit : null)
-                          : selected == null
-                          ? null
-                          : () => setState(() => _index += 1),
-                      child: Text(
-                        _submitting
-                            ? 'Submitting...'
-                            : _index == widget.detail.questions.length - 1
-                            ? 'Submit'
-                            : 'Next',
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class CompletionRewardScreen extends StatelessWidget {
   const CompletionRewardScreen({
     super.key,
@@ -1589,11 +1486,13 @@ class ProfileScreen extends StatelessWidget {
     required this.user,
     required this.summary,
     required this.badges,
+    required this.onOpenSettings,
   });
 
   final AppUser? user;
   final ProfileSummary summary;
   final List<EarnedBadge> badges;
+  final VoidCallback onOpenSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -1608,10 +1507,23 @@ class ProfileScreen extends StatelessWidget {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 110),
         children: [
-          Text(
-            'My Profile',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.displaySmall,
+          Stack(
+            alignment: Alignment.center,
+            children: [
+              Text(
+                'My Profile',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.displaySmall,
+              ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: IconButton.filledTonal(
+                  onPressed: user == null ? null : onOpenSettings,
+                  icon: const Icon(Icons.settings_rounded),
+                  tooltip: 'Settings',
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 24),
           const CircleAvatar(
@@ -2024,71 +1936,6 @@ class _ReaderBottomPanel extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _QuizOptionTile extends StatelessWidget {
-  const _QuizOptionTile({
-    required this.label,
-    required this.text,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final String text;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: selected ? const Color(0xFFFFF1E6) : Colors.white,
-      borderRadius: BorderRadius.circular(18),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(18),
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(
-              color: selected ? AppColors.saffron : AppColors.border,
-            ),
-          ),
-          child: Row(
-            children: [
-              CircleAvatar(
-                backgroundColor: const Color(0xFFFFE7B3),
-                child: Text(
-                  label,
-                  style: const TextStyle(
-                    color: AppColors.deepSaffron,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  text,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-              Icon(
-                selected
-                    ? Icons.check_circle_rounded
-                    : Icons.radio_button_unchecked_rounded,
-                color: selected ? AppColors.saffron : AppColors.mutedBrown,
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }

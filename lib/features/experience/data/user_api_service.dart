@@ -34,6 +34,18 @@ class UserApiService {
     return AppUser.fromJson(_readMap(json['user']));
   }
 
+  Future<AppUser> updateMe({
+    String? name,
+    String? notificationPreference,
+  }) async {
+    final json = await _client.patchJson('/api/users/me', {
+      if (name != null) 'name': name,
+      if (notificationPreference != null)
+        'notificationPreference': notificationPreference,
+    });
+    return AppUser.fromJson(_readMap(json['user']));
+  }
+
   Future<void> markActive() async {
     await _client.postJson('/api/users/active', const {});
   }
@@ -98,6 +110,14 @@ class UserApiService {
       },
     );
     return QuizAttemptResult.fromJson(json);
+  }
+
+  Future<QuizReviewResult?> fetchLatestQuizReview(String storyDayId) async {
+    final json = await _client.getJson(
+      '/api/app/story-days/$storyDayId/quiz-attempts/latest',
+    );
+    if (json['attempt'] == null) return null;
+    return QuizReviewResult.fromJson(json);
   }
 
   static Future<void> saveSession(AppSession session) async {
