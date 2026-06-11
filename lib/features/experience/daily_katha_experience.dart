@@ -1357,23 +1357,34 @@ class _StoryReaderScreenState extends State<StoryReaderScreen> {
                               ],
                             ),
                             const Spacer(),
-                            _ReaderBottomPanel(
-                              photoIndex: _index,
-                              totalPhotos: detail.photos.length,
-                              isFinalPhoto: isFinalPhoto,
-                              hasQuestions: detail.questions.isNotEmpty,
-                              onNext: () {
-                                if (isFinalPhoto) {
-                                  detail.questions.isEmpty
-                                      ? _finishDayWithoutQuiz(detail)
-                                      : _openQuiz(detail);
-                                } else {
-                                  _controller.nextPage(
-                                    duration: const Duration(milliseconds: 250),
-                                    curve: Curves.easeOut,
-                                  );
-                                }
-                              },
+                            Align(
+                              alignment: Alignment.bottomRight,
+                              child: _SmallNextButton(
+                                label: isFinalPhoto
+                                    ? detail.questions.isEmpty
+                                          ? 'Done'
+                                          : 'Quiz'
+                                    : 'Next',
+                                icon: isFinalPhoto
+                                    ? detail.questions.isEmpty
+                                          ? Icons.check_rounded
+                                          : Icons.quiz_rounded
+                                    : Icons.arrow_forward_rounded,
+                                onTap: () {
+                                  if (isFinalPhoto) {
+                                    detail.questions.isEmpty
+                                        ? _finishDayWithoutQuiz(detail)
+                                        : _openQuiz(detail);
+                                  } else {
+                                    _controller.nextPage(
+                                      duration: const Duration(
+                                        milliseconds: 250,
+                                      ),
+                                      curve: Curves.easeOut,
+                                    );
+                                  }
+                                },
+                              ),
                             ),
                           ],
                         ),
@@ -1877,65 +1888,45 @@ class _PhotoProgress extends StatelessWidget {
   }
 }
 
-class _ReaderBottomPanel extends StatelessWidget {
-  const _ReaderBottomPanel({
-    required this.photoIndex,
-    required this.totalPhotos,
-    required this.isFinalPhoto,
-    required this.hasQuestions,
-    required this.onNext,
+class _SmallNextButton extends StatelessWidget {
+  const _SmallNextButton({
+    required this.label,
+    required this.icon,
+    required this.onTap,
   });
 
-  final int photoIndex;
-  final int totalPhotos;
-  final bool isFinalPhoto;
-  final bool hasQuestions;
-  final VoidCallback onNext;
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: AppColors.ivory.withValues(alpha: .96),
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            'Photo ${photoIndex + 1} of $totalPhotos',
-            style: const TextStyle(
-              color: AppColors.deepSaffron,
-              fontWeight: FontWeight.w900,
-            ),
+    return Material(
+      color: AppColors.saffron.withValues(alpha: .94),
+      borderRadius: BorderRadius.circular(999),
+      elevation: 8,
+      shadowColor: Colors.black.withValues(alpha: .26),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: Colors.white, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 8),
-          Text(
-            isFinalPhoto
-                ? hasQuestions
-                      ? 'Story completed. Continue to quiz.'
-                      : 'Story completed. No quiz is assigned for this day.'
-                : 'Continue to the next photo.',
-            style: Theme.of(context).textTheme.bodyLarge,
-          ),
-          const SizedBox(height: 16),
-          FilledButton.icon(
-            onPressed: onNext,
-            icon: Icon(
-              isFinalPhoto ? Icons.quiz_rounded : Icons.arrow_forward_rounded,
-            ),
-            label: Text(
-              isFinalPhoto
-                  ? hasQuestions
-                        ? 'Start Quiz'
-                        : 'Complete Day'
-                  : 'Next Photo',
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }

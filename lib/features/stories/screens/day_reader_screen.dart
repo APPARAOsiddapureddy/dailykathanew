@@ -123,102 +123,117 @@ class _DayReaderScreenState extends State<DayReaderScreen> {
           }
 
           final isFinalPhoto = _photoIndex == detail.photos.length - 1;
-          return Stack(
-            children: [
-              PageView.builder(
-                controller: _pageController,
-                itemCount: detail.photos.length,
-                onPageChanged: (index) => setState(() => _photoIndex = index),
-                itemBuilder: (context, index) {
-                  return KathaNetworkImage(
-                    url: detail.photos[index].imageUrl,
-                    fit: BoxFit.cover,
-                  );
-                },
-              ),
-              const Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Color(0x99000000),
-                        Colors.transparent,
-                        Color(0xD9000000),
-                      ],
-                      stops: [0, 0.38, 1],
+          return Center(
+            child: AspectRatio(
+              aspectRatio: 9 / 16,
+              child: Stack(
+                children: [
+                  PageView.builder(
+                    controller: _pageController,
+                    itemCount: detail.photos.length,
+                    onPageChanged: (index) =>
+                        setState(() => _photoIndex = index),
+                    itemBuilder: (context, index) {
+                      return KathaNetworkImage(
+                        url: detail.photos[index].imageUrl,
+                        fit: BoxFit.cover,
+                      );
+                    },
+                  ),
+                  const Positioned.fill(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Color(0x99000000),
+                            Colors.transparent,
+                            Color(0xD9000000),
+                          ],
+                          stops: [0, 0.38, 1],
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ),
-              SafeArea(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    children: [
-                      Row(
+                  SafeArea(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
                         children: [
-                          IconButton.filledTonal(
-                            onPressed: () => Navigator.of(context).pop(),
-                            icon: const Icon(Icons.close_rounded),
+                          Row(
+                            children: [
+                              IconButton.filledTonal(
+                                onPressed: () => Navigator.of(context).pop(),
+                                icon: const Icon(Icons.close_rounded),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Day ${detail.day.dayNumber}',
+                                      style: const TextStyle(
+                                        color: AppColors.gold,
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                    ),
+                                    Text(
+                                      detail.day.title.isEmpty
+                                          ? detail.story.title
+                                          : detail.day.title,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 17,
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Day ${detail.day.dayNumber}',
-                                  style: const TextStyle(
-                                    color: AppColors.gold,
-                                    fontWeight: FontWeight.w900,
-                                  ),
-                                ),
-                                Text(
-                                  detail.day.title.isEmpty
-                                      ? detail.story.title
-                                      : detail.day.title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 17,
-                                    fontWeight: FontWeight.w900,
-                                  ),
-                                ),
-                              ],
+                          const SizedBox(height: 16),
+                          _PhotoProgress(
+                            count: detail.photos.length,
+                            activeIndex: _photoIndex,
+                          ),
+                          const Spacer(),
+                          Align(
+                            alignment: Alignment.bottomRight,
+                            child: _SmallNextButton(
+                              label: isFinalPhoto
+                                  ? detail.questions.isEmpty
+                                        ? 'Done'
+                                        : 'Quiz'
+                                  : 'Next',
+                              icon: isFinalPhoto
+                                  ? detail.questions.isEmpty
+                                        ? Icons.check_rounded
+                                        : Icons.quiz_rounded
+                                  : Icons.arrow_forward_rounded,
+                              onTap: () {
+                                if (isFinalPhoto) {
+                                  _openQuiz(detail);
+                                } else {
+                                  _pageController.nextPage(
+                                    duration: const Duration(milliseconds: 260),
+                                    curve: Curves.easeOut,
+                                  );
+                                }
+                              },
                             ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 16),
-                      _PhotoProgress(
-                        count: detail.photos.length,
-                        activeIndex: _photoIndex,
-                      ),
-                      const Spacer(),
-                      _ReaderBottomPanel(
-                        photoIndex: _photoIndex,
-                        totalPhotos: detail.photos.length,
-                        isFinalPhoto: isFinalPhoto,
-                        hasQuestions: detail.questions.isNotEmpty,
-                        onNext: () {
-                          if (isFinalPhoto) {
-                            _openQuiz(detail);
-                          } else {
-                            _pageController.nextPage(
-                              duration: const Duration(milliseconds: 260),
-                              curve: Curves.easeOut,
-                            );
-                          }
-                        },
-                      ),
-                    ],
+                    ),
                   ),
-                ),
+                ],
               ),
-            ],
+            ),
           );
         },
       ),
@@ -254,70 +269,44 @@ class _PhotoProgress extends StatelessWidget {
   }
 }
 
-class _ReaderBottomPanel extends StatelessWidget {
-  const _ReaderBottomPanel({
-    required this.photoIndex,
-    required this.totalPhotos,
-    required this.isFinalPhoto,
-    required this.hasQuestions,
-    required this.onNext,
+class _SmallNextButton extends StatelessWidget {
+  const _SmallNextButton({
+    required this.label,
+    required this.icon,
+    required this.onTap,
   });
 
-  final int photoIndex;
-  final int totalPhotos;
-  final bool isFinalPhoto;
-  final bool hasQuestions;
-  final VoidCallback onNext;
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: AppColors.ivory.withValues(alpha: 0.96),
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x55000000),
-            blurRadius: 24,
-            offset: Offset(0, 12),
+    return Material(
+      color: AppColors.deepSaffron,
+      borderRadius: BorderRadius.circular(999),
+      elevation: 8,
+      shadowColor: Colors.black.withValues(alpha: 0.35),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: Colors.white, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            'Photo ${photoIndex + 1} of $totalPhotos',
-            style: const TextStyle(
-              color: AppColors.deepSaffron,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            isFinalPhoto
-                ? hasQuestions
-                      ? 'Story photos completed. Continue to the quiz.'
-                      : 'Story photos completed. No quiz is assigned for this day.'
-                : 'Swipe or tap next to continue the story.',
-            style: Theme.of(context).textTheme.bodyLarge,
-          ),
-          const SizedBox(height: 16),
-          FilledButton.icon(
-            onPressed: onNext,
-            icon: Icon(isFinalPhoto ? Icons.quiz_rounded : Icons.arrow_forward),
-            label: Text(
-              isFinalPhoto
-                  ? hasQuestions
-                        ? 'Start Quiz'
-                        : 'Complete Day'
-                  : 'Next Photo',
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
