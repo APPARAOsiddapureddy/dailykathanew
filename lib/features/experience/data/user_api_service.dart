@@ -37,11 +37,15 @@ class UserApiService {
   Future<AppUser> updateMe({
     String? name,
     String? notificationPreference,
+    String? selectedLanguage,
+    List<String>? interests,
   }) async {
     final json = await _client.patchJson('/api/users/me', {
       if (name != null) 'name': name,
       if (notificationPreference != null)
         'notificationPreference': notificationPreference,
+      if (selectedLanguage != null) 'selectedLanguage': selectedLanguage,
+      if (interests != null) 'interests': interests,
     });
     return AppUser.fromJson(_readMap(json['user']));
   }

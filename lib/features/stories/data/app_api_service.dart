@@ -107,7 +107,13 @@ class _DemoContent {
         title: story.title,
         description: story.description,
       ),
-      day: DayInfo(id: day.id, dayNumber: day.dayNumber, title: day.title),
+      day: DayInfo(
+        id: day.id,
+        dayNumber: day.dayNumber,
+        title: day.title,
+        moral: '',
+        tomorrowTeaser: '',
+      ),
       photos: const [
         StoryPhoto(id: 'photo-1', imageUrl: '', order: 1),
         StoryPhoto(id: 'photo-2', imageUrl: '', order: 2),

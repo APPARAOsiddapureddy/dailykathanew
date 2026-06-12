@@ -25,8 +25,15 @@ class ReviewStatTile extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
         color: background,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(22),
         border: Border.all(color: color.withValues(alpha: .16)),
+        boxShadow: [
+          BoxShadow(
+            color: color.withValues(alpha: .08),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
       ),
       child: Row(
         children: [
@@ -89,13 +96,14 @@ class QuestionPaletteButton extends StatelessWidget {
 
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
+      borderRadius: BorderRadius.circular(18),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
         width: 54,
         height: 54,
         decoration: BoxDecoration(
           color: color,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(18),
           border: Border.all(
             color: selected ? AppColors.saffron : AppColors.border,
             width: selected ? 1.6 : 1,
@@ -129,7 +137,19 @@ class ReviewQuestionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: .9),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: AppColors.border.withValues(alpha: .44)),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.saffron.withValues(alpha: .1),
+            blurRadius: 26,
+            offset: const Offset(0, 14),
+          ),
+        ],
+      ),
       child: Padding(
         padding: const EdgeInsets.all(18),
         child: Column(
@@ -223,7 +243,7 @@ class ReviewOptionTile extends StatelessWidget {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: background,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: borderColor),
       ),
       child: Row(

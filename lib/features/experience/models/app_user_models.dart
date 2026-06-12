@@ -6,14 +6,18 @@ class AppUser {
     required this.currentStreak,
     required this.highestStreak,
     required this.notificationPreference,
+    required this.interests,
     this.name,
     this.avatarUrl,
+    this.selectedLanguage,
   });
 
   final String id;
   final String phoneNumber;
   final String? name;
   final String? avatarUrl;
+  final String? selectedLanguage;
+  final List<String> interests;
   final int points;
   final int currentStreak;
   final int highestStreak;
@@ -25,6 +29,8 @@ class AppUser {
       phoneNumber: _readString(json['phoneNumber']),
       name: _readNullableString(json['name']),
       avatarUrl: _readNullableString(json['avatarUrl']),
+      selectedLanguage: _readNullableString(json['selectedLanguage']),
+      interests: _readStringList(json['interests']),
       points: _readInt(json['points']),
       currentStreak: _readInt(json['currentStreak']),
       highestStreak: _readInt(json['highestStreak']),
@@ -41,12 +47,23 @@ class AppUser {
       'phoneNumber': phoneNumber,
       'name': name,
       'avatarUrl': avatarUrl,
+      'selectedLanguage': selectedLanguage,
+      'interests': interests,
       'points': points,
       'currentStreak': currentStreak,
       'highestStreak': highestStreak,
       'notificationPreference': notificationPreference,
     };
   }
+}
+
+List<String> _readStringList(Object? value) {
+  if (value is! List) return const [];
+  return value
+      .whereType<String>()
+      .map((item) => item.trim())
+      .where((item) => item.isNotEmpty)
+      .toList();
 }
 
 class AppSession {

@@ -13,6 +13,10 @@ class AppColors {
   static const success = Color(0xFF166534);
   static const error = Color(0xFFB42318);
   static const border = Color(0xFFE3C8A2);
+  static const peacock = Color(0xFF1455A0);
+  static const lotus = Color(0xFFC2417B);
+  static const templeMist = Color(0xFFEAF2EF);
+  static const dusk = Color(0xFF3A1C2B);
 }
 
 class DailyKathaTheme {
@@ -30,6 +34,26 @@ class DailyKathaTheme {
       colorScheme: scheme,
       scaffoldBackgroundColor: AppColors.ivory,
       fontFamily: 'Roboto',
+      splashFactory: NoSplash.splashFactory,
+      splashColor: Colors.transparent,
+      highlightColor: Colors.transparent,
+      hoverColor: const Color(0x14D97706),
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: const Color(0xFFFFFCF6),
+        indicatorColor: const Color(0xFFFFE4A8),
+        surfaceTintColor: Colors.transparent,
+        shadowColor: Colors.transparent,
+        overlayColor: WidgetStateProperty.all(const Color(0x1AD97706)),
+        iconTheme: WidgetStateProperty.resolveWith((states) {
+          final selected = states.contains(WidgetState.selected);
+          return IconThemeData(
+            color: selected ? AppColors.deepSaffron : AppColors.mutedBrown,
+          );
+        }),
+        labelTextStyle: WidgetStateProperty.all(
+          const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+        ),
+      ),
       appBarTheme: const AppBarTheme(
         elevation: 0,
         centerTitle: false,
@@ -105,7 +129,7 @@ class DailyKathaTheme {
         elevation: 0,
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(22),
+          borderRadius: BorderRadius.circular(24),
           side: const BorderSide(color: Color(0x44E3C8A2)),
         ),
       ),

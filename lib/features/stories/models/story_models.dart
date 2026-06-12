@@ -124,17 +124,23 @@ class DayInfo {
     required this.id,
     required this.dayNumber,
     required this.title,
+    required this.moral,
+    required this.tomorrowTeaser,
   });
 
   final String id;
   final int dayNumber;
   final String title;
+  final String moral;
+  final String tomorrowTeaser;
 
   factory DayInfo.fromJson(Map<String, dynamic> json) {
     return DayInfo(
       id: _readString(json['id']),
       dayNumber: _readInt(json['dayNumber']),
       title: _readString(json['title'], fallback: 'Daily Katha'),
+      moral: _readString(json['moral']),
+      tomorrowTeaser: _readString(json['tomorrowTeaser']),
     );
   }
 }
