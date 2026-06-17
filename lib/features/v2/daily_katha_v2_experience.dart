@@ -8,6 +8,7 @@ import '../../app/theme.dart';
 import '../../core/widgets/app_logo.dart';
 import '../stories/data/app_api_service.dart';
 import '../stories/models/story_models.dart' as cms;
+import '../stories/screens/quiz_screen.dart';
 
 class DailyKathaV2Experience extends StatefulWidget {
   const DailyKathaV2Experience({super.key});
@@ -198,24 +199,24 @@ class _DailyKathaV2ExperienceState extends State<DailyKathaV2Experience> {
                 completed: true,
               );
             });
-            Navigator.of(context).pushReplacement(
-              CinematicRoute<void>(
-                builder: (_) => LearningSummaryScreen(
-                  series: resolvedSeries,
-                  episode: resolvedEpisode,
-                  onContinue: () {
-                    final next = resolvedSeries.nextEpisodeAfter(
-                      resolvedEpisode.id,
-                    );
-                    if (next == null) {
-                      Navigator.of(context).popUntil((route) => route.isFirst);
-                      return;
-                    }
-                    _openEpisode(resolvedSeries, next);
-                  },
+
+            void finishStory() {
+              Navigator.of(context).pop();
+            }
+
+            if (resolvedEpisode.questions.isNotEmpty) {
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute<void>(
+                  builder: (_) => QuizScreen(
+                    api: _api,
+                    questions: resolvedEpisode.questions,
+                    onComplete: finishStory,
+                  ),
                 ),
-              ),
-            );
+              );
+            } else {
+              finishStory();
+            }
           },
         ),
       ),
@@ -3615,6 +3616,7 @@ class MythEpisode {
     required this.lesson,
     required this.characters,
     required this.slides,
+    this.questions = const [],
     this.isHydrated = false,
   });
 
@@ -3640,6 +3642,7 @@ class MythEpisode {
       characters: const [
         MythCharacter(name: 'Daily Katha', role: 'Story guide'),
       ],
+      questions: const [],
       slides: [
         MythSlide(
           id: '${day.id}-preview',
@@ -3674,6 +3677,7 @@ class MythEpisode {
       characters: const [
         MythCharacter(name: 'ప్రధాన పాత్ర', role: 'కథానాయకుడు'),
       ],
+      questions: const [],
       slides: [
         MythSlide(
           id: '$id-slide-1',
@@ -3704,6 +3708,7 @@ class MythEpisode {
   final String lesson;
   final List<MythCharacter> characters;
   final List<MythSlide> slides;
+  final List<cms.QuizQuestion> questions;
   final bool isHydrated;
 
   MythEpisode hydrateFromCms(
@@ -3742,6 +3747,7 @@ class MythEpisode {
       lesson: lessonText,
       characters: characters,
       slides: cmsSlides,
+      questions: detail.questions,
       isHydrated: true,
     );
   }

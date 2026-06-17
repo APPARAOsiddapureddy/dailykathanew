@@ -107,7 +107,6 @@ class KathaNetworkImage extends StatelessWidget {
         : Image.network(
             url!,
             fit: fit,
-            cacheWidth: (MediaQuery.sizeOf(context).width * 2).round(),
             loadingBuilder: (context, child, event) {
               if (event == null) return child;
               return const ColoredBox(

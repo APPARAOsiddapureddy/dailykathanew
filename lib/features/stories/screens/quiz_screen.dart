@@ -9,15 +9,17 @@ class QuizScreen extends StatefulWidget {
   const QuizScreen({
     super.key,
     required this.api,
-    required this.story,
-    required this.day,
+    this.story,
+    this.day,
     required this.questions,
+    this.onComplete,
   });
 
   final AppApiService api;
-  final Story story;
-  final StoryDaySummary day;
+  final Story? story;
+  final StoryDaySummary? day;
   final List<QuizQuestion> questions;
+  final VoidCallback? onComplete;
 
   @override
   State<QuizScreen> createState() => _QuizScreenState();
@@ -65,12 +67,16 @@ class _QuizScreenState extends State<QuizScreen> {
 
   void _continue() {
     if (_questionIndex == widget.questions.length - 1) {
+      if (widget.onComplete != null) {
+        widget.onComplete!();
+        return;
+      }
       Navigator.of(context).pushReplacement(
         MaterialPageRoute<void>(
           builder: (_) => CompletionScreen(
             api: widget.api,
-            story: widget.story,
-            day: widget.day,
+            story: widget.story!,
+            day: widget.day!,
             score: _score,
             total: widget.questions.length,
           ),
