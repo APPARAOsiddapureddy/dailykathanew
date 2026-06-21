@@ -4,6 +4,7 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
+import '../../app/config.dart';
 import '../../app/theme.dart';
 import '../../core/widgets/app_logo.dart';
 import '../stories/data/app_api_service.dart';
@@ -27,6 +28,13 @@ class _DailyKathaV2ExperienceState extends State<DailyKathaV2Experience> {
   _ShellTab _tab = _ShellTab.home;
   String _phoneNumber = '';
   ReadingProgress? _progress;
+  final Set<String> _completedEpisodeIds = <String>{};
+  final Set<String> _quizCompletedEpisodeIds = <String>{};
+  final Map<String, QuizPerformance> _quizPerformanceByEpisodeId =
+      <String, QuizPerformance>{};
+  int _points = 0;
+  int _streakDays = 0;
+  DateTime? _lastStreakDate;
   List<MythSeries> _series = const [];
   bool _loadingContent = true;
   String? _contentError;
@@ -47,11 +55,15 @@ class _DailyKathaV2ExperienceState extends State<DailyKathaV2Experience> {
     });
     try {
       final stories = await _api.fetchStories();
+      final baseSeries = stories.map(MythSeries.fromCmsStory).where((series) {
+        return series.episodes.isNotEmpty;
+      }).toList();
+      final hydratedSeries = await Future.wait(
+        baseSeries.map(_hydrateSeriesCover),
+      );
       if (!mounted) return;
       setState(() {
-        _series = stories.map(MythSeries.fromCmsStory).where((series) {
-          return series.episodes.isNotEmpty;
-        }).toList();
+        _series = hydratedSeries;
         _loadingContent = false;
       });
     } catch (error) {
@@ -114,6 +126,9 @@ class _DailyKathaV2ExperienceState extends State<DailyKathaV2Experience> {
           contentError: _contentError,
           openingEpisodeId: _openingEpisodeId,
           progress: _progress,
+          completedEpisodeIds: _completedEpisodeIds,
+          points: _points,
+          streakDays: _streakDays,
           bookmarkedEpisodeIds: _bookmarkedEpisodes,
           onTabChanged: (tab) => setState(() => _tab = tab),
           onOpenEpisode: _openEpisode,
@@ -131,6 +146,7 @@ class _DailyKathaV2ExperienceState extends State<DailyKathaV2Experience> {
         builder: (_) => SeriesDetailScreen(
           series: series,
           progress: _progress,
+          completedEpisodeIds: _completedEpisodeIds,
           onOpenEpisode: _openEpisode,
         ),
       ),
@@ -191,7 +207,13 @@ class _DailyKathaV2ExperienceState extends State<DailyKathaV2Experience> {
             });
           },
           onCompleted: () {
+            final firstCompletion = _completedEpisodeIds.add(
+              resolvedEpisode.id,
+            );
             setState(() {
+              if (firstCompletion) {
+                _awardActivityPoints(10);
+              }
               _progress = ReadingProgress(
                 seriesId: resolvedSeries.id,
                 episodeId: resolvedEpisode.id,
@@ -205,12 +227,52 @@ class _DailyKathaV2ExperienceState extends State<DailyKathaV2Experience> {
             }
 
             if (resolvedEpisode.questions.isNotEmpty) {
+              final existingPerformance =
+                  _quizPerformanceByEpisodeId[resolvedEpisode.id];
+              if (existingPerformance != null) {
+                Navigator.of(context).pushReplacement(
+                  MaterialPageRoute<void>(
+                    builder: (_) => QuizPerformanceScreen(
+                      episode: resolvedEpisode,
+                      performance: existingPerformance,
+                    ),
+                  ),
+                );
+                return;
+              }
               Navigator.of(context).pushReplacement(
                 MaterialPageRoute<void>(
                   builder: (_) => QuizScreen(
                     api: _api,
                     questions: resolvedEpisode.questions,
-                    onComplete: finishStory,
+                    onCompleteWithResult: (result) {
+                      final firstQuizCompletion = _quizCompletedEpisodeIds.add(
+                        resolvedEpisode.id,
+                      );
+                      final performance = QuizPerformance(
+                        score: result.score,
+                        total: result.total,
+                        pointsEarned: firstQuizCompletion
+                            ? result.score * 5
+                            : 0,
+                        answers: result.answers,
+                      );
+                      setState(() {
+                        _quizPerformanceByEpisodeId[resolvedEpisode.id] =
+                            performance;
+                      });
+                      if (firstQuizCompletion) {
+                        setState(() => _awardActivityPoints(result.score * 5));
+                      }
+                      Navigator.of(context).pushReplacement(
+                        MaterialPageRoute<void>(
+                          builder: (_) => QuizPerformanceScreen(
+                            episode: resolvedEpisode,
+                            performance: performance,
+                          ),
+                        ),
+                      );
+                    },
                   ),
                 ),
               );
@@ -235,12 +297,58 @@ class _DailyKathaV2ExperienceState extends State<DailyKathaV2Experience> {
     return episode.hydrateFromCms(detail, series: series);
   }
 
+  Future<MythSeries> _hydrateSeriesCover(MythSeries series) async {
+    if (series.coverImageUrl?.trim().isNotEmpty == true) return series;
+    if (series.episodes.isEmpty) return series;
+
+    try {
+      final firstEpisode = series.episodes.first;
+      final detail = await _api.fetchDay(
+        storyId: series.id,
+        dayNumber: firstEpisode.dayNumber,
+      );
+      final hydratedEpisode = firstEpisode.hydrateFromCms(
+        detail,
+        series: series,
+      );
+      final firstPhotoUrl = detail.photos.isEmpty
+          ? null
+          : detail.photos.first.imageUrl.trim();
+      return series
+          .replaceEpisode(hydratedEpisode)
+          .withCoverImageUrl(
+            firstPhotoUrl?.isEmpty == true ? null : firstPhotoUrl,
+          );
+    } catch (_) {
+      return series;
+    }
+  }
+
   void _toggleBookmark(String episodeId) {
     setState(() {
       if (!_bookmarkedEpisodes.add(episodeId)) {
         _bookmarkedEpisodes.remove(episodeId);
       }
     });
+  }
+
+  void _awardActivityPoints(int points) {
+    _points += points;
+
+    final today = DateUtils.dateOnly(DateTime.now());
+    final last = _lastStreakDate == null
+        ? null
+        : DateUtils.dateOnly(_lastStreakDate!);
+    if (last == null) {
+      _streakDays = 1;
+    } else if (last == today) {
+      // Points can be earned multiple times in a day, but streak should not.
+    } else if (last == today.subtract(const Duration(days: 1))) {
+      _streakDays += 1;
+    } else {
+      _streakDays = 1;
+    }
+    _lastStreakDate = today;
   }
 }
 
@@ -839,6 +947,9 @@ class V2MainShell extends StatelessWidget {
     required this.contentError,
     required this.openingEpisodeId,
     required this.progress,
+    required this.completedEpisodeIds,
+    required this.points,
+    required this.streakDays,
     required this.bookmarkedEpisodeIds,
     required this.onTabChanged,
     required this.onOpenEpisode,
@@ -853,6 +964,9 @@ class V2MainShell extends StatelessWidget {
   final String? contentError;
   final String? openingEpisodeId;
   final ReadingProgress? progress;
+  final Set<String> completedEpisodeIds;
+  final int points;
+  final int streakDays;
   final Set<String> bookmarkedEpisodeIds;
   final ValueChanged<_ShellTab> onTabChanged;
   final Future<void> Function(MythSeries series, MythEpisode episode)
@@ -869,6 +983,9 @@ class V2MainShell extends StatelessWidget {
         loadingContent: loadingContent,
         contentError: contentError,
         progress: progress,
+        completedEpisodeIds: completedEpisodeIds,
+        points: points,
+        streakDays: streakDays,
         onOpenEpisode: onOpenEpisode,
         onOpenSeries: onOpenSeries,
         onRetryContent: onRetryContent,
@@ -878,6 +995,7 @@ class V2MainShell extends StatelessWidget {
         loadingContent: loadingContent,
         contentError: contentError,
         progress: progress,
+        completedEpisodeIds: completedEpisodeIds,
         onOpenEpisode: onOpenEpisode,
         onOpenSeries: onOpenSeries,
         onRetryContent: onRetryContent,
@@ -887,7 +1005,11 @@ class V2MainShell extends StatelessWidget {
         bookmarkedEpisodeIds: bookmarkedEpisodeIds,
         onOpenEpisode: onOpenEpisode,
       ),
-      _ShellTab.profile: const ProfileScreenV2(),
+      _ShellTab.profile: ProfileScreenV2(
+        points: points,
+        streakDays: streakDays,
+        completedCount: completedEpisodeIds.length,
+      ),
     };
 
     return Scaffold(
@@ -1008,6 +1130,9 @@ class HomeScreenV2 extends StatelessWidget {
     required this.loadingContent,
     required this.contentError,
     required this.progress,
+    required this.completedEpisodeIds,
+    required this.points,
+    required this.streakDays,
     required this.onOpenEpisode,
     required this.onOpenSeries,
     required this.onRetryContent,
@@ -1017,6 +1142,9 @@ class HomeScreenV2 extends StatelessWidget {
   final bool loadingContent;
   final String? contentError;
   final ReadingProgress? progress;
+  final Set<String> completedEpisodeIds;
+  final int points;
+  final int streakDays;
   final Future<void> Function(MythSeries series, MythEpisode episode)
   onOpenEpisode;
   final ValueChanged<MythSeries> onOpenSeries;
@@ -1024,9 +1152,10 @@ class HomeScreenV2 extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final continueTarget = progress == null
-        ? catalog.featuredEpisode
-        : catalog.byEpisodeId(progress!.episodeId) ?? catalog.featuredEpisode;
+    final continueTarget = catalog.nextUnreadAfter(
+      progress?.episodeId,
+      completedEpisodeIds,
+    );
     return Scaffold(
       body: Stack(
         children: [
@@ -1041,7 +1170,10 @@ class HomeScreenV2 extends StatelessWidget {
                     delegate: SliverChildListDelegate.fixed([
                       StaggeredReveal(
                         delay: Duration.zero,
-                        child: const HomeTopBar(),
+                        child: HomeTopBar(
+                          points: points,
+                          streakDays: streakDays,
+                        ),
                       ),
                       if (loadingContent) ...[
                         const SizedBox(height: 22),
@@ -1162,7 +1294,10 @@ class HomeScreenV2 extends StatelessWidget {
 }
 
 class HomeTopBar extends StatelessWidget {
-  const HomeTopBar({super.key});
+  const HomeTopBar({super.key, required this.points, required this.streakDays});
+
+  final int points;
+  final int streakDays;
 
   @override
   Widget build(BuildContext context) {
@@ -1184,8 +1319,53 @@ class HomeTopBar extends StatelessWidget {
             ],
           ),
         ),
-        const SizedBox(width: 44),
+        RewardPill(
+          icon: Icons.stars_rounded,
+          label: '$points',
+          color: AppColors.deepSaffron,
+        ),
+        const SizedBox(width: 8),
+        RewardPill(
+          icon: Icons.local_fire_department_rounded,
+          label: '$streakDays',
+          color: AppColors.saffron,
+        ),
       ],
+    );
+  }
+}
+
+class RewardPill extends StatelessWidget {
+  const RewardPill({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.18)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 17),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(color: color, fontWeight: FontWeight.w900),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1614,11 +1794,13 @@ class SeriesDetailScreen extends StatelessWidget {
     super.key,
     required this.series,
     required this.progress,
+    required this.completedEpisodeIds,
     required this.onOpenEpisode,
   });
 
   final MythSeries series;
   final ReadingProgress? progress;
+  final Set<String> completedEpisodeIds;
   final void Function(MythSeries series, MythEpisode episode) onOpenEpisode;
 
   @override
@@ -1700,12 +1882,19 @@ class SeriesDetailScreen extends StatelessWidget {
               itemBuilder: (context, index) {
                 final episode = series.episodes[index];
                 final isCurrent = progress?.episodeId == episode.id;
+                final isCompleted = completedEpisodeIds.contains(episode.id);
+                final nextEpisode = series.nextUnreadEpisode(
+                  completedEpisodeIds,
+                );
+                final isNext = nextEpisode?.id == episode.id;
                 return StaggeredReveal(
                   delay: Duration(milliseconds: index * 40),
                   child: EpisodeListTile(
                     series: series,
                     episode: episode,
                     currentProgress: isCurrent ? progress : null,
+                    completed: isCompleted,
+                    next: isNext,
                     onTap: () => onOpenEpisode(series, episode),
                   ),
                 );
@@ -1724,22 +1913,30 @@ class EpisodeListTile extends StatelessWidget {
     required this.series,
     required this.episode,
     required this.currentProgress,
+    required this.completed,
+    required this.next,
     required this.onTap,
   });
 
   final MythSeries series;
   final MythEpisode episode;
   final ReadingProgress? currentProgress;
+  final bool completed;
+  final bool next;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final percent = currentProgress?.percentage(episode) ?? 0;
+    final percent = completed ? 1.0 : currentProgress?.percentage(episode) ?? 0;
     return PressableScale(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.all(14),
-        decoration: cinematicCardDecoration(radius: 22),
+        decoration: next
+            ? cinematicCardDecoration(radius: 22).copyWith(
+                border: Border.all(color: AppColors.saffron, width: 1.6),
+              )
+            : cinematicCardDecoration(radius: 22),
         child: Row(
           children: [
             Hero(
@@ -1768,6 +1965,16 @@ class EpisodeListTile extends StatelessWidget {
                       fontWeight: FontWeight.w900,
                     ),
                   ),
+                  if (completed || next) ...[
+                    const SizedBox(height: 6),
+                    EpisodeStatusPill(
+                      label: completed ? 'Completed' : 'Read next',
+                      color: completed ? AppColors.success : AppColors.saffron,
+                      icon: completed
+                          ? Icons.check_circle_rounded
+                          : Icons.arrow_forward_rounded,
+                    ),
+                  ],
                   const SizedBox(height: 5),
                   Text(
                     episode.title,
@@ -1789,9 +1996,55 @@ class EpisodeListTile extends StatelessWidget {
                 ],
               ),
             ),
-            const Icon(Icons.play_arrow_rounded, color: AppColors.saffron),
+            Icon(
+              completed
+                  ? Icons.check_circle_rounded
+                  : next
+                  ? Icons.arrow_forward_rounded
+                  : Icons.play_arrow_rounded,
+              color: completed ? AppColors.success : AppColors.saffron,
+            ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class EpisodeStatusPill extends StatelessWidget {
+  const EpisodeStatusPill({
+    super.key,
+    required this.label,
+    required this.color,
+    required this.icon,
+  });
+
+  final String label;
+  final Color color;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 12,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1873,144 +2126,160 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   @override
   Widget build(BuildContext context) {
-    final slide = widget.episode.slides[_index];
     return Scaffold(
       backgroundColor: const Color(0xFF130B07),
       body: GestureDetector(
         onLongPressStart: (_) => setState(() => _paused = true),
         onLongPressEnd: (_) => setState(() => _paused = false),
-        child: Stack(
+        child: Column(
           children: [
-            PageView.builder(
-              controller: _pageController,
-              physics: const BouncingScrollPhysics(),
-              itemCount: widget.episode.slides.length,
-              onPageChanged: (value) {
-                setState(() => _index = value);
-                widget.onProgress(value);
-                for (final upcoming
-                    in widget.episode.slides.skip(value).take(3)) {
-                  precacheImage(upcoming.imageProvider, context);
-                }
-              },
-              itemBuilder: (context, index) {
-                return AnimatedBuilder(
-                  animation: _pageController,
-                  builder: (context, _) {
-                    var delta = 0.0;
-                    if (_pageController.hasClients &&
-                        _pageController.position.haveDimensions) {
-                      delta =
-                          (_pageController.page ?? _index.toDouble()) -
-                          index.toDouble();
-                    }
-                    return ReaderSlideView(
-                      slide: widget.episode.slides[index],
-                      delta: delta,
-                      paused: _paused,
-                      isHeroSlide: index == widget.initialSlide,
-                      heroTag: 'episode-art-${widget.episode.id}',
-                    );
-                  },
-                );
-              },
-            ),
-            Positioned.fill(
-              child: Row(
+            Expanded(
+              child: Stack(
                 children: [
-                  Expanded(
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.translucent,
-                      onTap: () => _go(-1),
+                  PageView.builder(
+                    controller: _pageController,
+                    physics: const BouncingScrollPhysics(),
+                    itemCount: widget.episode.slides.length,
+                    onPageChanged: (value) {
+                      setState(() => _index = value);
+                      widget.onProgress(value);
+                      for (final upcoming
+                          in widget.episode.slides.skip(value).take(3)) {
+                        precacheImage(upcoming.imageProvider, context);
+                      }
+                    },
+                    itemBuilder: (context, index) {
+                      return AnimatedBuilder(
+                        animation: _pageController,
+                        builder: (context, _) {
+                          var delta = 0.0;
+                          if (_pageController.hasClients &&
+                              _pageController.position.haveDimensions) {
+                            delta =
+                                (_pageController.page ?? _index.toDouble()) -
+                                index.toDouble();
+                          }
+                          return ReaderSlideView(
+                            slide: widget.episode.slides[index],
+                            delta: delta,
+                            paused: _paused,
+                            isHeroSlide: index == widget.initialSlide,
+                            heroTag: 'episode-art-${widget.episode.id}',
+                          );
+                        },
+                      );
+                    },
+                  ),
+                  Positioned.fill(
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.translucent,
+                            onTap: () => _go(-1),
+                          ),
+                        ),
+                        Expanded(
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.translucent,
+                            onTap: _completeOrNext,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  Expanded(
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.translucent,
-                      onTap: _completeOrNext,
+                  SafeArea(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                      child: Column(
+                        children: [
+                          Row(
+                            children: List.generate(
+                              widget.episode.slides.length,
+                              (i) {
+                                return Expanded(
+                                  child: AnimatedContainer(
+                                    duration: MotionSpec.soft,
+                                    curve: MotionSpec.standard,
+                                    margin: EdgeInsets.only(
+                                      right:
+                                          i == widget.episode.slides.length - 1
+                                          ? 0
+                                          : 6,
+                                    ),
+                                    height: 3,
+                                    decoration: BoxDecoration(
+                                      color: i <= _index
+                                          ? Colors.white
+                                          : Colors.white.withValues(
+                                              alpha: 0.28,
+                                            ),
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          Row(
+                            children: [
+                              FrostedIconButton(
+                                icon: Icons.close_rounded,
+                                onTap: () => Navigator.of(context).pop(),
+                              ),
+                              const Spacer(),
+                              FrostedIconButton(
+                                icon: widget.isBookmarked
+                                    ? Icons.bookmark_rounded
+                                    : Icons.bookmark_border_rounded,
+                                onTap: widget.onToggleBookmark,
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   ),
+                  if (_paused)
+                    Positioned.fill(
+                      child: ColoredBox(
+                        color: Colors.black.withValues(alpha: 0.18),
+                        child: const Center(
+                          child: Icon(
+                            Icons.pause_circle_filled_rounded,
+                            color: Colors.white,
+                            size: 64,
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
             SafeArea(
+              top: false,
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                child: Column(
+                padding: const EdgeInsets.fromLTRB(18, 10, 18, 14),
+                child: Row(
                   children: [
-                    Row(
-                      children: List.generate(widget.episode.slides.length, (
-                        i,
-                      ) {
-                        return Expanded(
-                          child: AnimatedContainer(
-                            duration: MotionSpec.soft,
-                            curve: MotionSpec.standard,
-                            margin: EdgeInsets.only(
-                              right: i == widget.episode.slides.length - 1
-                                  ? 0
-                                  : 6,
-                            ),
-                            height: 3,
-                            decoration: BoxDecoration(
-                              color: i <= _index
-                                  ? Colors.white
-                                  : Colors.white.withValues(alpha: 0.28),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ),
-                        );
-                      }),
+                    Expanded(
+                      child: Text(
+                        '${_index + 1}/${widget.episode.slides.length}',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.72),
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
                     ),
-                    const SizedBox(height: 14),
-                    Row(
-                      children: [
-                        FrostedIconButton(
-                          icon: Icons.close_rounded,
-                          onTap: () => Navigator.of(context).pop(),
-                        ),
-                        const Spacer(),
-                        FrostedIconButton(
-                          icon: widget.isBookmarked
-                              ? Icons.bookmark_rounded
-                              : Icons.bookmark_border_rounded,
-                          onTap: widget.onToggleBookmark,
-                        ),
-                      ],
+                    ReaderPrimaryButton(
+                      isLast: _index == widget.episode.slides.length - 1,
+                      onTap: _completeOrNext,
                     ),
                   ],
                 ),
               ),
             ),
-            Positioned(
-              left: 18,
-              right: 18,
-              bottom: 20 + MediaQuery.paddingOf(context).bottom,
-              child: AnimatedSwitcher(
-                duration: MotionSpec.soft,
-                switchInCurve: MotionSpec.standard,
-                child: ReaderTextPanel(
-                  key: ValueKey(slide.id),
-                  slide: slide,
-                  episode: widget.episode,
-                  isLast: _index == widget.episode.slides.length - 1,
-                  onPrimary: _completeOrNext,
-                ),
-              ),
-            ),
-            if (_paused)
-              Positioned.fill(
-                child: ColoredBox(
-                  color: Colors.black.withValues(alpha: 0.18),
-                  child: const Center(
-                    child: Icon(
-                      Icons.pause_circle_filled_rounded,
-                      color: Colors.white,
-                      size: 64,
-                    ),
-                  ),
-                ),
-              ),
           ],
         ),
       ),
@@ -2060,13 +2329,64 @@ class ReaderSlideView extends StatelessWidget {
               colors: [
                 Colors.black.withValues(alpha: 0.24),
                 Colors.transparent,
-                Colors.black.withValues(alpha: 0.72),
+                Colors.transparent,
               ],
               stops: const [0, 0.48, 1],
             ),
           ),
         ),
       ],
+    );
+  }
+}
+
+class ReaderPrimaryButton extends StatelessWidget {
+  const ReaderPrimaryButton({
+    super.key,
+    required this.isLast,
+    required this.onTap,
+  });
+
+  final bool isLast;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(999),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+        child: Material(
+          color: AppColors.saffron.withValues(alpha: 0.92),
+          borderRadius: BorderRadius.circular(999),
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(999),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    isLast ? Icons.check_rounded : Icons.arrow_forward_rounded,
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    isLast ? 'Complete' : 'Next',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 15,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -2336,6 +2656,7 @@ class LibraryScreenV2 extends StatefulWidget {
     required this.loadingContent,
     required this.contentError,
     required this.progress,
+    required this.completedEpisodeIds,
     required this.onOpenEpisode,
     required this.onOpenSeries,
     required this.onRetryContent,
@@ -2345,6 +2666,7 @@ class LibraryScreenV2 extends StatefulWidget {
   final bool loadingContent;
   final String? contentError;
   final ReadingProgress? progress;
+  final Set<String> completedEpisodeIds;
   final Future<void> Function(MythSeries series, MythEpisode episode)
   onOpenEpisode;
   final ValueChanged<MythSeries> onOpenSeries;
@@ -2665,7 +2987,16 @@ class BookmarksScreenV2 extends StatelessWidget {
 }
 
 class ProfileScreenV2 extends StatelessWidget {
-  const ProfileScreenV2({super.key});
+  const ProfileScreenV2({
+    super.key,
+    required this.points,
+    required this.streakDays,
+    required this.completedCount,
+  });
+
+  final int points;
+  final int streakDays;
+  final int completedCount;
 
   @override
   Widget build(BuildContext context) {
@@ -2708,6 +3039,35 @@ class ProfileScreenV2 extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(
+                      child: RewardStatCard(
+                        icon: Icons.stars_rounded,
+                        value: '$points',
+                        label: 'Points',
+                        color: AppColors.deepSaffron,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: RewardStatCard(
+                        icon: Icons.local_fire_department_rounded,
+                        value: '$streakDays',
+                        label: 'Day streak',
+                        color: AppColors.saffron,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                RewardStatCard(
+                  icon: Icons.check_circle_rounded,
+                  value: '$completedCount',
+                  label: 'Completed days',
+                  color: AppColors.success,
+                ),
+                const SizedBox(height: 14),
                 const MinimalSettingTile(
                   icon: Icons.translate_rounded,
                   title: 'Language',
@@ -2719,6 +3079,361 @@ class ProfileScreenV2 extends StatelessWidget {
                   title: 'Reading size',
                   subtitle: 'Comfortable for elders',
                 ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class QuizPerformance {
+  const QuizPerformance({
+    required this.score,
+    required this.total,
+    required this.pointsEarned,
+    required this.answers,
+  });
+
+  final int score;
+  final int total;
+  final int pointsEarned;
+  final List<QuizAnswerResult> answers;
+
+  int get wrong => (total - score).clamp(0, total);
+}
+
+class QuizPerformanceScreen extends StatelessWidget {
+  const QuizPerformanceScreen({
+    super.key,
+    required this.episode,
+    required this.performance,
+  });
+
+  final MythEpisode episode;
+  final QuizPerformance performance;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Stack(
+        children: [
+          const ParchmentBackdrop(glow: 0.24, bellOffset: 0),
+          SafeArea(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(20, 22, 20, 28),
+              children: [
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: FrostedIconButton(
+                    icon: Icons.close_rounded,
+                    onTap: () => Navigator.of(context).pop(),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Container(
+                  padding: const EdgeInsets.all(22),
+                  decoration: cinematicCardDecoration(radius: 28),
+                  child: Column(
+                    children: [
+                      Container(
+                        width: 82,
+                        height: 82,
+                        decoration: BoxDecoration(
+                          color: AppColors.gold.withValues(alpha: 0.2),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.emoji_events_rounded,
+                          color: AppColors.deepSaffron,
+                          size: 44,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Quiz Performance',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.headlineMedium,
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        episode.title,
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodyLarge,
+                      ),
+                      const SizedBox(height: 22),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: RewardStatCard(
+                              icon: Icons.check_circle_rounded,
+                              value: '${performance.score}',
+                              label: 'Correct',
+                              color: AppColors.success,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: RewardStatCard(
+                              icon: Icons.cancel_rounded,
+                              value: '${performance.wrong}',
+                              label: 'Wrong',
+                              color: AppColors.error,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      RewardStatCard(
+                        icon: Icons.stars_rounded,
+                        value: '+${performance.pointsEarned}',
+                        label: performance.pointsEarned == 0
+                            ? 'Already claimed'
+                            : 'Points earned',
+                        color: AppColors.deepSaffron,
+                      ),
+                      if (performance.answers.isNotEmpty) ...[
+                        const SizedBox(height: 24),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'Answer review',
+                            style: Theme.of(context).textTheme.titleLarge,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        ...performance.answers.indexed.map((entry) {
+                          final index = entry.$1;
+                          final answer = entry.$2;
+                          return Padding(
+                            padding: EdgeInsets.only(
+                              bottom: index == performance.answers.length - 1
+                                  ? 0
+                                  : 12,
+                            ),
+                            child: QuizAnswerReviewCard(
+                              answerNumber: index + 1,
+                              answer: answer,
+                            ),
+                          );
+                        }),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 18),
+                FilledButton.icon(
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.arrow_back_rounded),
+                  label: const Text('Back to story'),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class QuizAnswerReviewCard extends StatelessWidget {
+  const QuizAnswerReviewCard({
+    super.key,
+    required this.answerNumber,
+    required this.answer,
+  });
+
+  final int answerNumber;
+  final QuizAnswerResult answer;
+
+  @override
+  Widget build(BuildContext context) {
+    final statusColor = answer.correct ? AppColors.success : AppColors.error;
+    final correctOption = answer.correctOption;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.72),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: statusColor.withValues(alpha: 0.24)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: statusColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Center(
+                  child: Text(
+                    '$answerNumber',
+                    style: TextStyle(
+                      color: statusColor,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  answer.question.questionText,
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+              ),
+              Icon(
+                answer.correct
+                    ? Icons.check_circle_rounded
+                    : Icons.cancel_rounded,
+                color: statusColor,
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          QuizOptionReviewLine(
+            label: 'Your answer',
+            option: answer.selectedOption,
+            color: statusColor,
+          ),
+          if (!answer.correct && correctOption != null) ...[
+            const SizedBox(height: 8),
+            QuizOptionReviewLine(
+              label: 'Correct answer',
+              option: correctOption,
+              color: AppColors.success,
+            ),
+          ] else if (!answer.correct) ...[
+            const SizedBox(height: 8),
+            const QuizCorrectAnswerPendingLine(),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class QuizCorrectAnswerPendingLine extends StatelessWidget {
+  const QuizCorrectAnswerPendingLine({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.success.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Text(
+        'Correct answer will appear after the CMS update is deployed.',
+        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+          color: AppColors.success,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+}
+
+class QuizOptionReviewLine extends StatelessWidget {
+  const QuizOptionReviewLine({
+    super.key,
+    required this.label,
+    required this.option,
+    required this.color,
+  });
+
+  final String label;
+  final cms.QuizOption option;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final optionLabel = option.label.trim();
+    final optionText = option.text.trim();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+              color: color,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            optionLabel.isEmpty ? optionText : '$optionLabel. $optionText',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: AppColors.brown,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class RewardStatCard extends StatelessWidget {
+  const RewardStatCard({
+    super.key,
+    required this.icon,
+    required this.value,
+    required this.label,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String value;
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: cinematicCardDecoration(radius: 22),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Icon(icon, color: color),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  value,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(color: color),
+                ),
+                const SizedBox(height: 2),
+                Text(label, style: Theme.of(context).textTheme.bodyMedium),
               ],
             ),
           ),
@@ -2953,7 +3668,7 @@ class _ProgressiveImage extends StatelessWidget {
     }
 
     return Image.network(
-      url,
+      _proxiedImageUrl(url),
       fit: fit,
       alignment: alignment,
       frameBuilder: _frameBuilder,
@@ -2979,6 +3694,15 @@ class _ProgressiveImage extends StatelessWidget {
     }
     return child;
   }
+}
+
+String _proxiedImageUrl(String url) {
+  final trimmed = url.trim();
+  if (trimmed.isEmpty) return trimmed;
+  if (trimmed.startsWith('${AppConfig.apiBaseUrl}/api/app/image-proxy')) {
+    return trimmed;
+  }
+  return '${AppConfig.apiBaseUrl}/api/app/image-proxy?url=${Uri.encodeComponent(trimmed)}';
 }
 
 class CinematicSkeleton extends StatefulWidget {
@@ -3526,6 +4250,34 @@ class ContentCatalog {
     }
     return null;
   }
+
+  EpisodePair? nextUnreadAfter(
+    String? currentEpisodeId,
+    Set<String> completedEpisodeIds,
+  ) {
+    if (currentEpisodeId != null) {
+      for (final item in series) {
+        final currentIndex = item.episodes.indexWhere(
+          (episode) => episode.id == currentEpisodeId,
+        );
+        if (currentIndex == -1) continue;
+        for (final episode in item.episodes.skip(currentIndex + 1)) {
+          if (!completedEpisodeIds.contains(episode.id)) {
+            return EpisodePair(item, episode);
+          }
+        }
+      }
+    }
+
+    for (final item in series) {
+      final episode = item.nextUnreadEpisode(completedEpisodeIds);
+      if (episode != null && !completedEpisodeIds.contains(episode.id)) {
+        return EpisodePair(item, episode);
+      }
+    }
+
+    return featuredEpisode;
+  }
 }
 
 class EpisodePair {
@@ -3597,10 +4349,32 @@ class MythSeries {
     );
   }
 
+  MythSeries withCoverImageUrl(String? imageUrl) {
+    return MythSeries(
+      id: id,
+      title: title,
+      category: category,
+      description: description,
+      coverAsset: coverAsset,
+      coverImageUrl: imageUrl?.trim().isNotEmpty == true
+          ? imageUrl!.trim()
+          : coverImageUrl,
+      accent: accent,
+      episodes: episodes,
+    );
+  }
+
   MythEpisode? nextEpisodeAfter(String episodeId) {
     final index = episodes.indexWhere((episode) => episode.id == episodeId);
     if (index == -1 || index == episodes.length - 1) return null;
     return episodes[index + 1];
+  }
+
+  MythEpisode? nextUnreadEpisode(Set<String> completedEpisodeIds) {
+    for (final episode in episodes) {
+      if (!completedEpisodeIds.contains(episode.id)) return episode;
+    }
+    return episodes.isEmpty ? null : episodes.last;
   }
 }
 
@@ -3773,7 +4547,7 @@ class MythSlide {
   ImageProvider get imageProvider {
     final url = imageUrl?.trim();
     if (url == null || url.isEmpty) return AssetImage(imageAsset);
-    return NetworkImage(url);
+    return NetworkImage(_proxiedImageUrl(url));
   }
 }
 

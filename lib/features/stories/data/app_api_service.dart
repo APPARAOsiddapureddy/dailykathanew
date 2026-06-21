@@ -38,7 +38,10 @@ class AppApiService {
     required String optionId,
   }) async {
     if (AppConfig.useDemoData) {
-      return CheckAnswerResult(correct: optionId.endsWith('-correct'));
+      return CheckAnswerResult(
+        correct: optionId.endsWith('-correct'),
+        correctOptionId: optionId.endsWith('-correct') ? optionId : null,
+      );
     }
 
     final json = await _client.postJson(

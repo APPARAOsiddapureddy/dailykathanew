@@ -236,12 +236,29 @@ class QuizOption {
 }
 
 class CheckAnswerResult {
-  const CheckAnswerResult({required this.correct});
+  const CheckAnswerResult({
+    required this.correct,
+    this.correctOptionId,
+    this.correctOptionLabel,
+    this.correctOptionText,
+  });
 
   final bool correct;
+  final String? correctOptionId;
+  final String? correctOptionLabel;
+  final String? correctOptionText;
 
   factory CheckAnswerResult.fromJson(Map<String, dynamic> json) {
-    return CheckAnswerResult(correct: json['correct'] == true);
+    final correctOption = json['correctOption'];
+    final optionMap = correctOption is Map<String, dynamic>
+        ? correctOption
+        : const <String, dynamic>{};
+    return CheckAnswerResult(
+      correct: json['correct'] == true,
+      correctOptionId: _readNullableString(optionMap['id']),
+      correctOptionLabel: _readNullableString(optionMap['label']),
+      correctOptionText: _readNullableString(optionMap['text']),
+    );
   }
 }
 

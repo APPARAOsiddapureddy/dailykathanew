@@ -13,6 +13,7 @@ class QuizScreen extends StatefulWidget {
     this.day,
     required this.questions,
     this.onComplete,
+    this.onCompleteWithResult,
   });
 
   final AppApiService api;
@@ -20,6 +21,7 @@ class QuizScreen extends StatefulWidget {
   final StoryDaySummary? day;
   final List<QuizQuestion> questions;
   final VoidCallback? onComplete;
+  final void Function(QuizResult result)? onCompleteWithResult;
 
   @override
   State<QuizScreen> createState() => _QuizScreenState();
@@ -32,6 +34,7 @@ class _QuizScreenState extends State<QuizScreen> {
   bool? _lastCorrect;
   bool _checking = false;
   String? _error;
+  final List<QuizAnswerResult> _answers = <QuizAnswerResult>[];
 
   QuizQuestion get _question => widget.questions[_questionIndex];
 
@@ -52,6 +55,20 @@ class _QuizScreenState extends State<QuizScreen> {
       setState(() {
         _lastCorrect = result.correct;
         if (result.correct) _score += 1;
+        _answers.add(
+          QuizAnswerResult(
+            question: _question,
+            selectedOption: option,
+            correctOption: result.correctOptionId == null
+                ? null
+                : QuizOption(
+                    id: result.correctOptionId!,
+                    label: result.correctOptionLabel ?? '',
+                    text: result.correctOptionText ?? '',
+                  ),
+            correct: result.correct,
+          ),
+        );
       });
     } catch (error) {
       setState(() {
@@ -67,6 +84,16 @@ class _QuizScreenState extends State<QuizScreen> {
 
   void _continue() {
     if (_questionIndex == widget.questions.length - 1) {
+      if (widget.onCompleteWithResult != null) {
+        widget.onCompleteWithResult!(
+          QuizResult(
+            score: _score,
+            total: widget.questions.length,
+            answers: List<QuizAnswerResult>.unmodifiable(_answers),
+          ),
+        );
+        return;
+      }
       if (widget.onComplete != null) {
         widget.onComplete!();
         return;
@@ -199,6 +226,32 @@ class _QuizScreenState extends State<QuizScreen> {
       ),
     );
   }
+}
+
+class QuizResult {
+  const QuizResult({
+    required this.score,
+    required this.total,
+    required this.answers,
+  });
+
+  final int score;
+  final int total;
+  final List<QuizAnswerResult> answers;
+}
+
+class QuizAnswerResult {
+  const QuizAnswerResult({
+    required this.question,
+    required this.selectedOption,
+    this.correctOption,
+    required this.correct,
+  });
+
+  final QuizQuestion question;
+  final QuizOption selectedOption;
+  final QuizOption? correctOption;
+  final bool correct;
 }
 
 class _OptionButton extends StatelessWidget {
