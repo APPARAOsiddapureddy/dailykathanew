@@ -6,9 +6,12 @@ import '../../app/config.dart';
 import '../errors/app_exception.dart';
 
 class ApiClient {
-  ApiClient({String? baseUrl}) : _baseUrl = baseUrl ?? AppConfig.apiBaseUrl;
+  ApiClient({String? baseUrl, String? authToken})
+    : _baseUrl = baseUrl ?? AppConfig.apiBaseUrl,
+      _authToken = authToken;
 
   final String _baseUrl;
+  final String? _authToken;
   final HttpClient _client = HttpClient()
     ..connectionTimeout = const Duration(seconds: 12);
 
@@ -29,7 +32,18 @@ class ApiClient {
 
   Future<HttpClientRequest> _open(String method, String path) {
     final uri = Uri.parse('$_baseUrl$path');
-    return _client.openUrl(method, uri).timeout(const Duration(seconds: 12));
+    return _client
+        .openUrl(method, uri)
+        .timeout(const Duration(seconds: 12))
+        .then((request) {
+          if (_authToken?.isNotEmpty == true) {
+            request.headers.set(
+              HttpHeaders.authorizationHeader,
+              'Bearer $_authToken',
+            );
+          }
+          return request;
+        });
   }
 
   Future<Map<String, dynamic>> _send(HttpClientRequest request) async {

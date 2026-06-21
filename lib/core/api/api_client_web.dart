@@ -8,9 +8,12 @@ import '../../app/config.dart';
 import '../errors/app_exception.dart';
 
 class ApiClient {
-  ApiClient({String? baseUrl}) : _baseUrl = baseUrl ?? AppConfig.apiBaseUrl;
+  ApiClient({String? baseUrl, String? authToken})
+    : _baseUrl = baseUrl ?? AppConfig.apiBaseUrl,
+      _authToken = authToken;
 
   final String _baseUrl;
+  final String? _authToken;
 
   Future<Map<String, dynamic>> getJson(String path) {
     return _send('GET', path);
@@ -32,7 +35,11 @@ class ApiClient {
       final response = await html.HttpRequest.request(
         '$_baseUrl$path',
         method: method,
-        requestHeaders: const {'Content-Type': 'application/json'},
+        requestHeaders: {
+          'Content-Type': 'application/json',
+          if (_authToken?.isNotEmpty == true)
+            'Authorization': 'Bearer $_authToken',
+        },
         sendData: body == null ? null : jsonEncode(body),
       ).timeout(const Duration(seconds: 18));
 

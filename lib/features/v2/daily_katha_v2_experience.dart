@@ -10,6 +10,7 @@ import '../../core/widgets/app_logo.dart';
 import '../stories/data/app_api_service.dart';
 import '../stories/models/story_models.dart' as cms;
 import '../stories/screens/quiz_screen.dart';
+import 'data/v2_user_api_service.dart';
 
 class DailyKathaV2Experience extends StatefulWidget {
   const DailyKathaV2Experience({super.key});
@@ -18,23 +19,25 @@ class DailyKathaV2Experience extends StatefulWidget {
   State<DailyKathaV2Experience> createState() => _DailyKathaV2ExperienceState();
 }
 
-enum _LaunchStage { splash, phone, otp, home }
+enum _LaunchStage { splash, phone, profile, otp, home }
 
 enum _ShellTab { home, library, bookmarks, profile }
 
 class _DailyKathaV2ExperienceState extends State<DailyKathaV2Experience> {
   final AppApiService _api = AppApiService();
+  V2UserApiService? _userApi;
   _LaunchStage _stage = _LaunchStage.splash;
   _ShellTab _tab = _ShellTab.home;
   String _phoneNumber = '';
+  String? _profileName;
   ReadingProgress? _progress;
+  UserProgressSnapshot _userProgress = UserProgressSnapshot.empty();
   final Set<String> _completedEpisodeIds = <String>{};
   final Set<String> _quizCompletedEpisodeIds = <String>{};
   final Map<String, QuizPerformance> _quizPerformanceByEpisodeId =
       <String, QuizPerformance>{};
   int _points = 0;
   int _streakDays = 0;
-  DateTime? _lastStreakDate;
   List<MythSeries> _series = const [];
   bool _loadingContent = true;
   String? _contentError;
@@ -105,9 +108,22 @@ class _DailyKathaV2ExperienceState extends State<DailyKathaV2Experience> {
         _LaunchStage.phone => PhoneNumberScreen(
           key: const ValueKey('phone'),
           initialPhone: _phoneNumber,
-          onOtpRequested: (phone) {
+          onPhoneReady: (phone, needsProfile) {
             setState(() {
               _phoneNumber = phone;
+              _profileName = null;
+              _stage = needsProfile ? _LaunchStage.profile : _LaunchStage.otp;
+            });
+          },
+        ),
+        _LaunchStage.profile => ProfileNameScreen(
+          key: const ValueKey('profile-name'),
+          phone: _phoneNumber,
+          initialName: _profileName ?? '',
+          onBack: () => setState(() => _stage = _LaunchStage.phone),
+          onContinue: (name) {
+            setState(() {
+              _profileName = name;
               _stage = _LaunchStage.otp;
             });
           },
@@ -115,8 +131,11 @@ class _DailyKathaV2ExperienceState extends State<DailyKathaV2Experience> {
         _LaunchStage.otp => OtpVerificationScreen(
           key: const ValueKey('otp'),
           phone: _phoneNumber,
-          onChangePhone: () => setState(() => _stage = _LaunchStage.phone),
-          onVerified: () => setState(() => _stage = _LaunchStage.home),
+          onChangePhone: () => setState(() {
+            _profileName = null;
+            _stage = _LaunchStage.phone;
+          }),
+          onVerified: _createBackendSession,
         ),
         _LaunchStage.home => V2MainShell(
           key: const ValueKey('home'),
@@ -126,6 +145,7 @@ class _DailyKathaV2ExperienceState extends State<DailyKathaV2Experience> {
           contentError: _contentError,
           openingEpisodeId: _openingEpisodeId,
           progress: _progress,
+          userProgress: _userProgress,
           completedEpisodeIds: _completedEpisodeIds,
           points: _points,
           streakDays: _streakDays,
@@ -135,6 +155,7 @@ class _DailyKathaV2ExperienceState extends State<DailyKathaV2Experience> {
           onOpenSeries: _openSeries,
           onRetryContent: _loadStories,
           onToggleBookmark: _toggleBookmark,
+          onLogout: _logout,
         ),
       },
     );
@@ -146,11 +167,32 @@ class _DailyKathaV2ExperienceState extends State<DailyKathaV2Experience> {
         builder: (_) => SeriesDetailScreen(
           series: series,
           progress: _progress,
+          userProgress: _userProgress,
           completedEpisodeIds: _completedEpisodeIds,
           onOpenEpisode: _openEpisode,
         ),
       ),
     );
+  }
+
+  Future<void> _createBackendSession() async {
+    final session = await V2UserApiService().createSession(
+      phoneNumber: '+91$_phoneNumber',
+      name: _profileName,
+    );
+    final userApi = V2UserApiService(authToken: session.token);
+    final progress = await userApi.fetchProgress();
+    if (!mounted) return;
+    setState(() {
+      _userApi = userApi;
+      _points = session.user.points;
+      _streakDays = session.user.currentStreak;
+      _completedEpisodeIds
+        ..clear()
+        ..addAll(progress.completedStoryDayIds);
+      _userProgress = progress;
+      _stage = _LaunchStage.home;
+    });
   }
 
   Future<void> _openEpisode(MythSeries series, MythEpisode episode) async {
@@ -185,15 +227,28 @@ class _DailyKathaV2ExperienceState extends State<DailyKathaV2Experience> {
       (item) => item.id == series.id,
       orElse: () => series.replaceEpisode(resolvedEpisode),
     );
+    final savedProgress = _progressForEpisode(resolvedSeries, resolvedEpisode);
+    final initialSlide = savedProgress?.slideIndex ?? 0;
+    if (!_completedEpisodeIds.contains(resolvedEpisode.id)) {
+      setState(() {
+        _progress = ReadingProgress(
+          seriesId: resolvedSeries.id,
+          episodeId: resolvedEpisode.id,
+          slideIndex: initialSlide,
+          completed: false,
+        );
+      });
+      unawaited(
+        _saveEpisodeProgressInBackend(resolvedEpisode.id, initialSlide),
+      );
+    }
 
     Navigator.of(context).push(
       CinematicRoute<void>(
         builder: (_) => ReaderScreen(
           series: resolvedSeries,
           episode: resolvedEpisode,
-          initialSlide: _progress?.episodeId == resolvedEpisode.id
-              ? _progress!.slideIndex
-              : 0,
+          initialSlide: initialSlide,
           isBookmarked: _bookmarkedEpisodes.contains(resolvedEpisode.id),
           onToggleBookmark: () => _toggleBookmark(resolvedEpisode.id),
           onProgress: (slideIndex) {
@@ -205,15 +260,15 @@ class _DailyKathaV2ExperienceState extends State<DailyKathaV2Experience> {
                 completed: false,
               );
             });
+            unawaited(
+              _saveEpisodeProgressInBackend(resolvedEpisode.id, slideIndex),
+            );
           },
           onCompleted: () {
             final firstCompletion = _completedEpisodeIds.add(
               resolvedEpisode.id,
             );
             setState(() {
-              if (firstCompletion) {
-                _awardActivityPoints(10);
-              }
               _progress = ReadingProgress(
                 seriesId: resolvedSeries.id,
                 episodeId: resolvedEpisode.id,
@@ -221,6 +276,9 @@ class _DailyKathaV2ExperienceState extends State<DailyKathaV2Experience> {
                 completed: true,
               );
             });
+            if (firstCompletion) {
+              unawaited(_completeEpisodeInBackend(resolvedEpisode.id));
+            }
 
             void finishStory() {
               Navigator.of(context).pop();
@@ -261,9 +319,7 @@ class _DailyKathaV2ExperienceState extends State<DailyKathaV2Experience> {
                         _quizPerformanceByEpisodeId[resolvedEpisode.id] =
                             performance;
                       });
-                      if (firstQuizCompletion) {
-                        setState(() => _awardActivityPoints(result.score * 5));
-                      }
+                      if (firstQuizCompletion) unawaited(_refreshUserStats());
                       Navigator.of(context).pushReplacement(
                         MaterialPageRoute<void>(
                           builder: (_) => QuizPerformanceScreen(
@@ -332,23 +388,81 @@ class _DailyKathaV2ExperienceState extends State<DailyKathaV2Experience> {
     });
   }
 
-  void _awardActivityPoints(int points) {
-    _points += points;
+  void _logout() {
+    setState(() {
+      _userApi = null;
+      _phoneNumber = '';
+      _profileName = null;
+      _tab = _ShellTab.home;
+      _progress = null;
+      _userProgress = UserProgressSnapshot.empty();
+      _completedEpisodeIds.clear();
+      _quizCompletedEpisodeIds.clear();
+      _quizPerformanceByEpisodeId.clear();
+      _points = 0;
+      _streakDays = 0;
+      _bookmarkedEpisodes.clear();
+      _stage = _LaunchStage.phone;
+    });
+  }
 
-    final today = DateUtils.dateOnly(DateTime.now());
-    final last = _lastStreakDate == null
-        ? null
-        : DateUtils.dateOnly(_lastStreakDate!);
-    if (last == null) {
-      _streakDays = 1;
-    } else if (last == today) {
-      // Points can be earned multiple times in a day, but streak should not.
-    } else if (last == today.subtract(const Duration(days: 1))) {
-      _streakDays += 1;
-    } else {
-      _streakDays = 1;
+  Future<void> _completeEpisodeInBackend(String storyDayId) async {
+    final userApi = _userApi;
+    if (userApi == null) return;
+    try {
+      await userApi.completeDay(storyDayId);
+      await _refreshUserStats();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not save streak: $error'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     }
-    _lastStreakDate = today;
+  }
+
+  Future<void> _saveEpisodeProgressInBackend(
+    String storyDayId,
+    int slideIndex,
+  ) async {
+    final userApi = _userApi;
+    if (userApi == null || _completedEpisodeIds.contains(storyDayId)) return;
+    try {
+      await userApi.updateDayProgress(
+        storyDayId: storyDayId,
+        lastPhotoIndex: slideIndex,
+      );
+    } catch (_) {
+      // Keep reading smooth even if a background progress save fails.
+    }
+  }
+
+  Future<void> _refreshUserStats() async {
+    final userApi = _userApi;
+    if (userApi == null) return;
+    final user = await userApi.fetchMe();
+    final progress = await userApi.fetchProgress();
+    if (!mounted) return;
+    setState(() {
+      _points = user.points;
+      _streakDays = user.currentStreak;
+      _completedEpisodeIds
+        ..clear()
+        ..addAll(progress.completedStoryDayIds);
+      _userProgress = progress;
+    });
+  }
+
+  ReadingProgress? _progressForEpisode(MythSeries series, MythEpisode episode) {
+    return progressForEpisode(
+      liveProgress: _progress,
+      userProgress: _userProgress,
+      completedEpisodeIds: _completedEpisodeIds,
+      series: series,
+      episode: episode,
+    );
   }
 }
 
@@ -571,11 +685,11 @@ class PhoneNumberScreen extends StatefulWidget {
   const PhoneNumberScreen({
     super.key,
     required this.initialPhone,
-    required this.onOtpRequested,
+    required this.onPhoneReady,
   });
 
   final String initialPhone;
-  final ValueChanged<String> onOtpRequested;
+  final void Function(String phone, bool needsProfile) onPhoneReady;
 
   @override
   State<PhoneNumberScreen> createState() => _PhoneNumberScreenState();
@@ -584,6 +698,8 @@ class PhoneNumberScreen extends StatefulWidget {
 class _PhoneNumberScreenState extends State<PhoneNumberScreen> {
   late String _phone;
   Timer? _autoSubmitTimer;
+  bool _checking = false;
+  String? _error;
 
   @override
   void initState() {
@@ -598,8 +714,11 @@ class _PhoneNumberScreenState extends State<PhoneNumberScreen> {
   }
 
   void _append(String digit) {
-    if (_phone.length >= 10) return;
-    setState(() => _phone += digit);
+    if (_phone.length >= 10 || _checking) return;
+    setState(() {
+      _phone += digit;
+      _error = null;
+    });
     if (_phone.length == 10) {
       _autoSubmitTimer?.cancel();
       _autoSubmitTimer = Timer(const Duration(milliseconds: 360), _requestOtp);
@@ -608,12 +727,31 @@ class _PhoneNumberScreenState extends State<PhoneNumberScreen> {
 
   void _backspace() {
     _autoSubmitTimer?.cancel();
+    if (_checking) return;
     if (_phone.isEmpty) return;
-    setState(() => _phone = _phone.substring(0, _phone.length - 1));
+    setState(() {
+      _phone = _phone.substring(0, _phone.length - 1);
+      _error = null;
+    });
   }
 
-  void _requestOtp() {
-    if (_phone.length == 10) widget.onOtpRequested(_phone);
+  Future<void> _requestOtp() async {
+    if (_phone.length != 10 || _checking) return;
+    setState(() {
+      _checking = true;
+      _error = null;
+    });
+    try {
+      final result = await V2UserApiService().checkPhone('+91$_phone');
+      if (!mounted) return;
+      widget.onPhoneReady(_phone, !result.exists || result.needsProfile);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _checking = false;
+        _error = '$error';
+      });
+    }
   }
 
   @override
@@ -671,13 +809,110 @@ class _PhoneNumberScreenState extends State<PhoneNumberScreen> {
             ),
             const SizedBox(height: 22),
             FilledButton(
-              onPressed: _phone.length == 10 ? _requestOtp : null,
+              onPressed: _phone.length == 10 && !_checking ? _requestOtp : null,
               child: const Text('OTP పొందండి'),
             ),
+            if (_checking) ...[
+              const SizedBox(height: 12),
+              const Text(
+                'Checking...',
+                style: TextStyle(
+                  color: AppColors.deepSaffron,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+            if (_error != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                _error!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: AppColors.error,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
           ],
         ),
       ),
       keypad: NumberPad(onDigit: _append, onBackspace: _backspace),
+    );
+  }
+}
+
+class ProfileNameScreen extends StatefulWidget {
+  const ProfileNameScreen({
+    super.key,
+    required this.phone,
+    required this.initialName,
+    required this.onBack,
+    required this.onContinue,
+  });
+
+  final String phone;
+  final String initialName;
+  final VoidCallback onBack;
+  final ValueChanged<String> onContinue;
+
+  @override
+  State<ProfileNameScreen> createState() => _ProfileNameScreenState();
+}
+
+class _ProfileNameScreenState extends State<ProfileNameScreen> {
+  late final TextEditingController _nameController;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.initialName);
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  void _continue() {
+    final name = _nameController.text.trim();
+    if (name.isEmpty) return;
+    widget.onContinue(name);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AuthScaffold(
+      title: 'Tell us your name',
+      subtitle:
+          '+91 ${widget.phone} is new here. Add your name to create your Daily Katha profile.',
+      child: AnimatedContainer(
+        duration: MotionSpec.soft,
+        curve: MotionSpec.standard,
+        padding: const EdgeInsets.all(18),
+        decoration: authCardDecoration(active: true),
+        child: Column(
+          children: [
+            TextField(
+              controller: _nameController,
+              autofocus: true,
+              textCapitalization: TextCapitalization.words,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _continue(),
+              decoration: const InputDecoration(
+                labelText: 'Name',
+                hintText: 'Enter your name',
+              ),
+            ),
+            const SizedBox(height: 16),
+            FilledButton(onPressed: _continue, child: const Text('Continue')),
+            TextButton(
+              onPressed: widget.onBack,
+              child: const Text('Change number'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -692,7 +927,7 @@ class OtpVerificationScreen extends StatefulWidget {
 
   final String phone;
   final VoidCallback onChangePhone;
-  final VoidCallback onVerified;
+  final Future<void> Function() onVerified;
 
   @override
   State<OtpVerificationScreen> createState() => _OtpVerificationScreenState();
@@ -701,6 +936,7 @@ class OtpVerificationScreen extends StatefulWidget {
 class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
   String _otp = '';
   bool _verifying = false;
+  String? _error;
 
   void _append(String digit) {
     if (_otp.length >= 4 || _verifying) return;
@@ -717,10 +953,20 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
 
   Future<void> _verify() async {
     if (_otp.length != 4 || _verifying) return;
-    setState(() => _verifying = true);
-    await Future<void>.delayed(const Duration(milliseconds: 520));
-    if (!mounted) return;
-    widget.onVerified();
+    setState(() {
+      _verifying = true;
+      _error = null;
+    });
+    try {
+      await Future<void>.delayed(const Duration(milliseconds: 520));
+      await widget.onVerified();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _verifying = false;
+        _error = '$error';
+      });
+    }
   }
 
   @override
@@ -768,6 +1014,17 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
               }),
             ),
             const SizedBox(height: 18),
+            if (_error != null) ...[
+              Text(
+                _error!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: AppColors.error,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
             AnimatedSwitcher(
               duration: MotionSpec.micro,
               child: _verifying
@@ -818,13 +1075,13 @@ class AuthScaffold extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.child,
-    required this.keypad,
+    this.keypad,
   });
 
   final String title;
   final String subtitle;
   final Widget child;
-  final Widget keypad;
+  final Widget? keypad;
 
   @override
   Widget build(BuildContext context) {
@@ -870,7 +1127,7 @@ class AuthScaffold extends StatelessWidget {
                         ),
                       ),
                       const Spacer(flex: 2),
-                      keypad,
+                      if (keypad case final keypad?) keypad,
                     ],
                   ),
                 ),
@@ -947,6 +1204,7 @@ class V2MainShell extends StatelessWidget {
     required this.contentError,
     required this.openingEpisodeId,
     required this.progress,
+    required this.userProgress,
     required this.completedEpisodeIds,
     required this.points,
     required this.streakDays,
@@ -956,6 +1214,7 @@ class V2MainShell extends StatelessWidget {
     required this.onOpenSeries,
     required this.onRetryContent,
     required this.onToggleBookmark,
+    required this.onLogout,
   });
 
   final _ShellTab tab;
@@ -964,6 +1223,7 @@ class V2MainShell extends StatelessWidget {
   final String? contentError;
   final String? openingEpisodeId;
   final ReadingProgress? progress;
+  final UserProgressSnapshot userProgress;
   final Set<String> completedEpisodeIds;
   final int points;
   final int streakDays;
@@ -974,6 +1234,7 @@ class V2MainShell extends StatelessWidget {
   final ValueChanged<MythSeries> onOpenSeries;
   final Future<void> Function() onRetryContent;
   final ValueChanged<String> onToggleBookmark;
+  final VoidCallback onLogout;
 
   @override
   Widget build(BuildContext context) {
@@ -983,6 +1244,7 @@ class V2MainShell extends StatelessWidget {
         loadingContent: loadingContent,
         contentError: contentError,
         progress: progress,
+        userProgress: userProgress,
         completedEpisodeIds: completedEpisodeIds,
         points: points,
         streakDays: streakDays,
@@ -995,6 +1257,7 @@ class V2MainShell extends StatelessWidget {
         loadingContent: loadingContent,
         contentError: contentError,
         progress: progress,
+        userProgress: userProgress,
         completedEpisodeIds: completedEpisodeIds,
         onOpenEpisode: onOpenEpisode,
         onOpenSeries: onOpenSeries,
@@ -1009,6 +1272,7 @@ class V2MainShell extends StatelessWidget {
         points: points,
         streakDays: streakDays,
         completedCount: completedEpisodeIds.length,
+        onLogout: onLogout,
       ),
     };
 
@@ -1130,6 +1394,7 @@ class HomeScreenV2 extends StatelessWidget {
     required this.loadingContent,
     required this.contentError,
     required this.progress,
+    required this.userProgress,
     required this.completedEpisodeIds,
     required this.points,
     required this.streakDays,
@@ -1142,6 +1407,7 @@ class HomeScreenV2 extends StatelessWidget {
   final bool loadingContent;
   final String? contentError;
   final ReadingProgress? progress;
+  final UserProgressSnapshot userProgress;
   final Set<String> completedEpisodeIds;
   final int points;
   final int streakDays;
@@ -1204,10 +1470,13 @@ class HomeScreenV2 extends StatelessWidget {
                           delay: const Duration(milliseconds: 90),
                           child: ContinueReadingCard(
                             pair: continueTarget,
-                            progress:
-                                progress?.episodeId == continueTarget.episode.id
-                                ? progress
-                                : null,
+                            progress: progressForEpisode(
+                              liveProgress: progress,
+                              userProgress: userProgress,
+                              completedEpisodeIds: completedEpisodeIds,
+                              series: continueTarget.series,
+                              episode: continueTarget.episode,
+                            ),
                             onTap: () => onOpenEpisode(
                               continueTarget.series,
                               continueTarget.episode,
@@ -1256,9 +1525,12 @@ class HomeScreenV2 extends StatelessWidget {
                                 delay: Duration(milliseconds: 350 + index * 70),
                                 child: SeriesCard(
                                   series: series,
-                                  progress: progress?.seriesId == series.id
-                                      ? progress
-                                      : null,
+                                  progressValue: seriesProgressValue(
+                                    series: series,
+                                    liveProgress: progress,
+                                    userProgress: userProgress,
+                                    completedEpisodeIds: completedEpisodeIds,
+                                  ),
                                   onTap: () => onOpenSeries(series),
                                 ),
                               );
@@ -1573,12 +1845,12 @@ class SeriesCard extends StatelessWidget {
   const SeriesCard({
     super.key,
     required this.series,
-    required this.progress,
+    required this.progressValue,
     required this.onTap,
   });
 
   final MythSeries series;
-  final ReadingProgress? progress;
+  final double progressValue;
   final VoidCallback onTap;
 
   @override
@@ -1619,11 +1891,7 @@ class SeriesCard extends StatelessWidget {
                       style: Theme.of(context).textTheme.bodyMedium,
                     ),
                     const SizedBox(height: 12),
-                    SmoothProgress(
-                      value: progress == null
-                          ? 0
-                          : progress!.seriesProgress(series),
-                    ),
+                    SmoothProgress(value: progressValue),
                   ],
                 ),
               ),
@@ -1794,12 +2062,14 @@ class SeriesDetailScreen extends StatelessWidget {
     super.key,
     required this.series,
     required this.progress,
+    required this.userProgress,
     required this.completedEpisodeIds,
     required this.onOpenEpisode,
   });
 
   final MythSeries series;
   final ReadingProgress? progress;
+  final UserProgressSnapshot userProgress;
   final Set<String> completedEpisodeIds;
   final void Function(MythSeries series, MythEpisode episode) onOpenEpisode;
 
@@ -1881,7 +2151,13 @@ class SeriesDetailScreen extends StatelessWidget {
               separatorBuilder: (_, _) => const SizedBox(height: 12),
               itemBuilder: (context, index) {
                 final episode = series.episodes[index];
-                final isCurrent = progress?.episodeId == episode.id;
+                final episodeProgress = progressForEpisode(
+                  liveProgress: progress,
+                  userProgress: userProgress,
+                  completedEpisodeIds: completedEpisodeIds,
+                  series: series,
+                  episode: episode,
+                );
                 final isCompleted = completedEpisodeIds.contains(episode.id);
                 final nextEpisode = series.nextUnreadEpisode(
                   completedEpisodeIds,
@@ -1892,7 +2168,7 @@ class SeriesDetailScreen extends StatelessWidget {
                   child: EpisodeListTile(
                     series: series,
                     episode: episode,
-                    currentProgress: isCurrent ? progress : null,
+                    currentProgress: episodeProgress,
                     completed: isCompleted,
                     next: isNext,
                     onTap: () => onOpenEpisode(series, episode),
@@ -2656,6 +2932,7 @@ class LibraryScreenV2 extends StatefulWidget {
     required this.loadingContent,
     required this.contentError,
     required this.progress,
+    required this.userProgress,
     required this.completedEpisodeIds,
     required this.onOpenEpisode,
     required this.onOpenSeries,
@@ -2666,6 +2943,7 @@ class LibraryScreenV2 extends StatefulWidget {
   final bool loadingContent;
   final String? contentError;
   final ReadingProgress? progress;
+  final UserProgressSnapshot userProgress;
   final Set<String> completedEpisodeIds;
   final Future<void> Function(MythSeries series, MythEpisode episode)
   onOpenEpisode;
@@ -2690,10 +2968,16 @@ class _LibraryScreenV2State extends State<LibraryScreenV2> {
   Widget build(BuildContext context) {
     final query = _search.text.trim().toLowerCase();
     final series = widget.catalog.series.where((item) {
+      final inProgress = isSeriesInProgress(
+        series: item,
+        liveProgress: widget.progress,
+        userProgress: widget.userProgress,
+        completedEpisodeIds: widget.completedEpisodeIds,
+      );
       final matchesFilter =
           _filter == 'All' ||
           item.category == _filter ||
-          (_filter == 'In Progress' && widget.progress?.seriesId == item.id);
+          (_filter == 'In Progress' && inProgress);
       final matchesQuery =
           query.isEmpty ||
           item.title.toLowerCase().contains(query) ||
@@ -2756,9 +3040,12 @@ class _LibraryScreenV2State extends State<LibraryScreenV2> {
                       padding: const EdgeInsets.only(bottom: 14),
                       child: LibrarySeriesTile(
                         series: item,
-                        progress: widget.progress?.seriesId == item.id
-                            ? widget.progress
-                            : null,
+                        progressValue: seriesProgressValue(
+                          series: item,
+                          liveProgress: widget.progress,
+                          userProgress: widget.userProgress,
+                          completedEpisodeIds: widget.completedEpisodeIds,
+                        ),
                         onTap: () => widget.onOpenSeries(item),
                       ),
                     ),
@@ -2862,12 +3149,12 @@ class LibrarySeriesTile extends StatelessWidget {
   const LibrarySeriesTile({
     super.key,
     required this.series,
-    required this.progress,
+    required this.progressValue,
     required this.onTap,
   });
 
   final MythSeries series;
-  final ReadingProgress? progress;
+  final double progressValue;
   final VoidCallback onTap;
 
   @override
@@ -2911,11 +3198,7 @@ class LibrarySeriesTile extends StatelessWidget {
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                   const SizedBox(height: 12),
-                  SmoothProgress(
-                    value: progress == null
-                        ? 0
-                        : progress!.seriesProgress(series),
-                  ),
+                  SmoothProgress(value: progressValue),
                 ],
               ),
             ),
@@ -2992,11 +3275,13 @@ class ProfileScreenV2 extends StatelessWidget {
     required this.points,
     required this.streakDays,
     required this.completedCount,
+    required this.onLogout,
   });
 
   final int points;
   final int streakDays;
   final int completedCount;
+  final VoidCallback onLogout;
 
   @override
   Widget build(BuildContext context) {
@@ -3078,6 +3363,13 @@ class ProfileScreenV2 extends StatelessWidget {
                   icon: Icons.text_fields_rounded,
                   title: 'Reading size',
                   subtitle: 'Comfortable for elders',
+                ),
+                const SizedBox(height: 10),
+                MinimalSettingTile(
+                  icon: Icons.logout_rounded,
+                  title: 'Logout',
+                  subtitle: 'Sign out from this device',
+                  onTap: onLogout,
                 ),
               ],
             ),
@@ -3449,15 +3741,17 @@ class MinimalSettingTile extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.subtitle,
+    this.onTap,
   });
 
   final IconData icon;
   final String title;
   final String subtitle;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    final content = Container(
       padding: const EdgeInsets.all(16),
       decoration: cinematicCardDecoration(radius: 22),
       child: Row(
@@ -3474,7 +3768,27 @@ class MinimalSettingTile extends StatelessWidget {
               ],
             ),
           ),
+          if (onTap != null) ...[
+            const SizedBox(width: 10),
+            const Icon(
+              Icons.chevron_right_rounded,
+              color: AppColors.mutedBrown,
+            ),
+          ],
         ],
+      ),
+    );
+
+    if (onTap == null) {
+      return content;
+    }
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(22),
+        child: content,
       ),
     );
   }
@@ -4623,4 +4937,108 @@ class ReadingProgress {
     final episode = series.episodes[index];
     return ((index) + percentage(episode)) / series.episodes.length;
   }
+}
+
+ReadingProgress? progressForEpisode({
+  required ReadingProgress? liveProgress,
+  required UserProgressSnapshot userProgress,
+  required Set<String> completedEpisodeIds,
+  required MythSeries series,
+  required MythEpisode episode,
+}) {
+  if (liveProgress?.episodeId == episode.id) return liveProgress;
+
+  final lastIndex = math.max(0, episode.slides.length - 1);
+  if (completedEpisodeIds.contains(episode.id)) {
+    return ReadingProgress(
+      seriesId: series.id,
+      episodeId: episode.id,
+      slideIndex: lastIndex,
+      completed: true,
+    );
+  }
+
+  final dayProgress = userProgress.dayProgressByStoryDayId[episode.id];
+  if (dayProgress == null || !dayProgress.started) return null;
+
+  return ReadingProgress(
+    seriesId: series.id,
+    episodeId: episode.id,
+    slideIndex: dayProgress.lastPhotoIndex.clamp(0, lastIndex).toInt(),
+    completed: dayProgress.completed,
+  );
+}
+
+bool isSeriesInProgress({
+  required MythSeries series,
+  required ReadingProgress? liveProgress,
+  required UserProgressSnapshot userProgress,
+  required Set<String> completedEpisodeIds,
+}) {
+  if (_seriesCompleted(series, userProgress, completedEpisodeIds)) return false;
+  if (liveProgress?.seriesId == series.id) return true;
+
+  final storyProgress = userProgress.storyProgressByStoryId[series.id];
+  if (storyProgress?.started == true) return true;
+
+  return userProgress.dayProgressByStoryDayId.values.any(
+    (progress) => progress.storyId == series.id && progress.started,
+  );
+}
+
+double seriesProgressValue({
+  required MythSeries series,
+  required ReadingProgress? liveProgress,
+  required UserProgressSnapshot userProgress,
+  required Set<String> completedEpisodeIds,
+}) {
+  if (series.episodes.isEmpty) return 0;
+  if (_seriesCompleted(series, userProgress, completedEpisodeIds)) return 1;
+
+  var completedCount = 0.0;
+  for (final episode in series.episodes) {
+    if (completedEpisodeIds.contains(episode.id)) {
+      completedCount += 1;
+      continue;
+    }
+
+    if (liveProgress?.episodeId == episode.id) {
+      completedCount += liveProgress!.percentage(episode).clamp(0.0, 1.0);
+      continue;
+    }
+
+    final dayProgress = userProgress.dayProgressByStoryDayId[episode.id];
+    if (dayProgress == null || !dayProgress.started) continue;
+    if (dayProgress.completed) {
+      completedCount += 1;
+    } else if (episode.isHydrated && episode.slides.isNotEmpty) {
+      completedCount +=
+          ((dayProgress.lastPhotoIndex + 1) / episode.slides.length).clamp(
+            0.0,
+            0.98,
+          );
+    } else {
+      completedCount += _startedDayPlaceholderProgress(dayProgress);
+    }
+  }
+
+  return (completedCount / series.episodes.length).clamp(0.0, 1.0);
+}
+
+bool _seriesCompleted(
+  MythSeries series,
+  UserProgressSnapshot userProgress,
+  Set<String> completedEpisodeIds,
+) {
+  if (series.episodes.isEmpty) return false;
+  final storyProgress = userProgress.storyProgressByStoryId[series.id];
+  if (storyProgress?.completed == true) return true;
+  return series.episodes.every((episode) {
+    return completedEpisodeIds.contains(episode.id);
+  });
+}
+
+double _startedDayPlaceholderProgress(StoryDayProgressSnapshot progress) {
+  final slideWeight = (progress.lastPhotoIndex + 1) * 0.12;
+  return math.min(0.7, math.max(0.18, slideWeight));
 }
