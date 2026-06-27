@@ -26,6 +26,10 @@ class ApiClient {
     return _send('POST', path, body: body);
   }
 
+  Future<void> deleteJson(String path) async {
+    await _send('DELETE', path);
+  }
+
   Future<Map<String, dynamic>> _send(
     String method,
     String path, {
@@ -46,6 +50,10 @@ class ApiClient {
       final status = response.status ?? 0;
       if (status < 200 || status >= 300) {
         throw AppException('Server returned $status. Please try again.');
+      }
+
+      if ((response.responseText ?? '').trim().isEmpty) {
+        return const <String, dynamic>{};
       }
 
       final decoded = jsonDecode(response.responseText ?? '{}');

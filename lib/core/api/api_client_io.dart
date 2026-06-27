@@ -30,6 +30,11 @@ class ApiClient {
     return _send(request);
   }
 
+  Future<void> deleteJson(String path) async {
+    final request = await _open('DELETE', path);
+    await _sendVoid(request);
+  }
+
   Future<HttpClientRequest> _open(String method, String path) {
     final uri = Uri.parse('$_baseUrl$path');
     return _client
@@ -71,6 +76,29 @@ class ApiClient {
       );
     } on FormatException {
       throw const AppException('The server response was not valid JSON.');
+    }
+  }
+
+  Future<void> _sendVoid(HttpClientRequest request) async {
+    try {
+      final response = await request.close().timeout(
+        const Duration(seconds: 18),
+      );
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw AppException(
+          'Server returned ${response.statusCode}. Please try again.',
+        );
+      }
+
+      await response.drain<void>();
+    } on TimeoutException {
+      throw const AppException('The request timed out. Please try again.');
+    } on SocketException {
+      throw AppException(
+        'Could not reach Daily Katha API at $_baseUrl. '
+        'If you are using a physical phone, use your computer LAN IP instead of localhost.',
+      );
     }
   }
 }

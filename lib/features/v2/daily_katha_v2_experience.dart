@@ -10,6 +10,7 @@ import '../../core/widgets/app_logo.dart';
 import '../stories/data/app_api_service.dart';
 import '../stories/models/story_models.dart' as cms;
 import '../stories/screens/quiz_screen.dart';
+import 'data/v2_session_store.dart';
 import 'data/v2_user_api_service.dart';
 
 class DailyKathaV2Experience extends StatefulWidget {
@@ -19,12 +20,13 @@ class DailyKathaV2Experience extends StatefulWidget {
   State<DailyKathaV2Experience> createState() => _DailyKathaV2ExperienceState();
 }
 
-enum _LaunchStage { splash, phone, profile, otp, home }
+enum _LaunchStage { splash, phone, profile, home }
 
 enum _ShellTab { home, library, bookmarks, profile }
 
 class _DailyKathaV2ExperienceState extends State<DailyKathaV2Experience> {
   final AppApiService _api = AppApiService();
+  final V2SessionStore _sessionStore = const V2SessionStore();
   V2UserApiService? _userApi;
   _LaunchStage _stage = _LaunchStage.splash;
   _ShellTab _tab = _ShellTab.home;
@@ -47,7 +49,7 @@ class _DailyKathaV2ExperienceState extends State<DailyKathaV2Experience> {
   @override
   void initState() {
     super.initState();
-    unawaited(_finishSplash());
+    unawaited(_restoreSavedSession());
     unawaited(_loadStories());
   }
 
@@ -78,10 +80,38 @@ class _DailyKathaV2ExperienceState extends State<DailyKathaV2Experience> {
     }
   }
 
-  Future<void> _finishSplash() async {
+  Future<void> _restoreSavedSession() async {
     await Future<void>.delayed(MotionSpec.splashHold);
     if (!mounted || _stage != _LaunchStage.splash) return;
-    setState(() => _stage = _LaunchStage.phone);
+
+    try {
+      final savedSession = await _sessionStore.read();
+      if (savedSession == null) {
+        if (!mounted || _stage != _LaunchStage.splash) return;
+        setState(() => _stage = _LaunchStage.phone);
+        return;
+      }
+
+      final userApi = V2UserApiService(authToken: savedSession.token);
+      final profile = await userApi.fetchMe();
+      final progress = await userApi.fetchProgress();
+      if (!mounted || _stage != _LaunchStage.splash) return;
+      setState(() {
+        _userApi = userApi;
+        _phoneNumber = _phoneDigits(profile.phoneNumber);
+        _points = profile.points;
+        _streakDays = profile.currentStreak;
+        _completedEpisodeIds
+          ..clear()
+          ..addAll(progress.completedStoryDayIds);
+        _userProgress = progress;
+        _stage = _LaunchStage.home;
+      });
+    } catch (_) {
+      await _sessionStore.clear();
+      if (!mounted || _stage != _LaunchStage.splash) return;
+      setState(() => _stage = _LaunchStage.phone);
+    }
   }
 
   @override
@@ -108,12 +138,16 @@ class _DailyKathaV2ExperienceState extends State<DailyKathaV2Experience> {
         _LaunchStage.phone => PhoneNumberScreen(
           key: const ValueKey('phone'),
           initialPhone: _phoneNumber,
-          onPhoneReady: (phone, needsProfile) {
+          onPhoneReady: (phone, needsProfile) async {
             setState(() {
               _phoneNumber = phone;
               _profileName = null;
-              _stage = needsProfile ? _LaunchStage.profile : _LaunchStage.otp;
             });
+            if (needsProfile) {
+              setState(() => _stage = _LaunchStage.profile);
+              return;
+            }
+            await _createBackendSession();
           },
         ),
         _LaunchStage.profile => ProfileNameScreen(
@@ -124,18 +158,9 @@ class _DailyKathaV2ExperienceState extends State<DailyKathaV2Experience> {
           onContinue: (name) {
             setState(() {
               _profileName = name;
-              _stage = _LaunchStage.otp;
             });
+            unawaited(_createBackendSession());
           },
-        ),
-        _LaunchStage.otp => OtpVerificationScreen(
-          key: const ValueKey('otp'),
-          phone: _phoneNumber,
-          onChangePhone: () => setState(() {
-            _profileName = null;
-            _stage = _LaunchStage.phone;
-          }),
-          onVerified: _createBackendSession,
         ),
         _LaunchStage.home => V2MainShell(
           key: const ValueKey('home'),
@@ -156,6 +181,7 @@ class _DailyKathaV2ExperienceState extends State<DailyKathaV2Experience> {
           onRetryContent: _loadStories,
           onToggleBookmark: _toggleBookmark,
           onLogout: _logout,
+          onDeleteAccount: _deleteAccount,
         ),
       },
     );
@@ -179,6 +205,10 @@ class _DailyKathaV2ExperienceState extends State<DailyKathaV2Experience> {
     final session = await V2UserApiService().createSession(
       phoneNumber: '+91$_phoneNumber',
       name: _profileName,
+    );
+    await _sessionStore.save(
+      token: session.token,
+      phoneNumber: session.user.phoneNumber,
     );
     final userApi = V2UserApiService(authToken: session.token);
     final progress = await userApi.fetchProgress();
@@ -389,6 +419,7 @@ class _DailyKathaV2ExperienceState extends State<DailyKathaV2Experience> {
   }
 
   void _logout() {
+    unawaited(_sessionStore.clear());
     setState(() {
       _userApi = null;
       _phoneNumber = '';
@@ -404,6 +435,39 @@ class _DailyKathaV2ExperienceState extends State<DailyKathaV2Experience> {
       _bookmarkedEpisodes.clear();
       _stage = _LaunchStage.phone;
     });
+  }
+
+  Future<void> _deleteAccount() async {
+    final userApi = _userApi;
+    if (userApi == null) {
+      _logout();
+      return;
+    }
+
+    await userApi.deleteAccount();
+    await _sessionStore.clear();
+    if (!mounted) return;
+    setState(() {
+      _userApi = null;
+      _phoneNumber = '';
+      _profileName = null;
+      _tab = _ShellTab.home;
+      _progress = null;
+      _userProgress = UserProgressSnapshot.empty();
+      _completedEpisodeIds.clear();
+      _quizCompletedEpisodeIds.clear();
+      _quizPerformanceByEpisodeId.clear();
+      _points = 0;
+      _streakDays = 0;
+      _bookmarkedEpisodes.clear();
+      _stage = _LaunchStage.phone;
+    });
+  }
+
+  String _phoneDigits(String phoneNumber) {
+    final digits = phoneNumber.replaceAll(RegExp(r'\D'), '');
+    if (digits.length <= 10) return digits;
+    return digits.substring(digits.length - 10);
   }
 
   Future<void> _completeEpisodeInBackend(String storyDayId) async {
@@ -689,7 +753,7 @@ class PhoneNumberScreen extends StatefulWidget {
   });
 
   final String initialPhone;
-  final void Function(String phone, bool needsProfile) onPhoneReady;
+  final Future<void> Function(String phone, bool needsProfile) onPhoneReady;
 
   @override
   State<PhoneNumberScreen> createState() => _PhoneNumberScreenState();
@@ -721,7 +785,7 @@ class _PhoneNumberScreenState extends State<PhoneNumberScreen> {
     });
     if (_phone.length == 10) {
       _autoSubmitTimer?.cancel();
-      _autoSubmitTimer = Timer(const Duration(milliseconds: 360), _requestOtp);
+      _autoSubmitTimer = Timer(const Duration(milliseconds: 360), _continue);
     }
   }
 
@@ -735,7 +799,7 @@ class _PhoneNumberScreenState extends State<PhoneNumberScreen> {
     });
   }
 
-  Future<void> _requestOtp() async {
+  Future<void> _continue() async {
     if (_phone.length != 10 || _checking) return;
     setState(() {
       _checking = true;
@@ -744,7 +808,7 @@ class _PhoneNumberScreenState extends State<PhoneNumberScreen> {
     try {
       final result = await V2UserApiService().checkPhone('+91$_phone');
       if (!mounted) return;
-      widget.onPhoneReady(_phone, !result.exists || result.needsProfile);
+      await widget.onPhoneReady(_phone, !result.exists || result.needsProfile);
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -809,8 +873,8 @@ class _PhoneNumberScreenState extends State<PhoneNumberScreen> {
             ),
             const SizedBox(height: 22),
             FilledButton(
-              onPressed: _phone.length == 10 && !_checking ? _requestOtp : null,
-              child: const Text('OTP పొందండి'),
+              onPressed: _phone.length == 10 && !_checking ? _continue : null,
+              child: const Text('Continue'),
             ),
             if (_checking) ...[
               const SizedBox(height: 12),
@@ -913,139 +977,6 @@ class _ProfileNameScreenState extends State<ProfileNameScreen> {
           ],
         ),
       ),
-    );
-  }
-}
-
-class OtpVerificationScreen extends StatefulWidget {
-  const OtpVerificationScreen({
-    super.key,
-    required this.phone,
-    required this.onChangePhone,
-    required this.onVerified,
-  });
-
-  final String phone;
-  final VoidCallback onChangePhone;
-  final Future<void> Function() onVerified;
-
-  @override
-  State<OtpVerificationScreen> createState() => _OtpVerificationScreenState();
-}
-
-class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
-  String _otp = '';
-  bool _verifying = false;
-  String? _error;
-
-  void _append(String digit) {
-    if (_otp.length >= 4 || _verifying) return;
-    setState(() => _otp += digit);
-    if (_otp.length == 4) {
-      Future<void>.delayed(const Duration(milliseconds: 180), _verify);
-    }
-  }
-
-  void _backspace() {
-    if (_otp.isEmpty || _verifying) return;
-    setState(() => _otp = _otp.substring(0, _otp.length - 1));
-  }
-
-  Future<void> _verify() async {
-    if (_otp.length != 4 || _verifying) return;
-    setState(() {
-      _verifying = true;
-      _error = null;
-    });
-    try {
-      await Future<void>.delayed(const Duration(milliseconds: 520));
-      await widget.onVerified();
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _verifying = false;
-        _error = '$error';
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AuthScaffold(
-      title: 'OTP నమోదు చేయండి',
-      subtitle: '+91 ${widget.phone} కు పంపిన 4 అంకెల కోడ్‌ను నమోదు చేయండి.',
-      child: AnimatedContainer(
-        duration: MotionSpec.soft,
-        curve: MotionSpec.standard,
-        padding: const EdgeInsets.all(18),
-        decoration: authCardDecoration(active: _otp.isNotEmpty),
-        child: Column(
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: List.generate(4, (index) {
-                final active = index == _otp.length && !_verifying;
-                final filled = index < _otp.length;
-                return AnimatedContainer(
-                  duration: MotionSpec.micro,
-                  curve: MotionSpec.standard,
-                  width: 58,
-                  height: 64,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: filled
-                        ? const Color(0xFFFFF4DA)
-                        : AppColors.ivory.withValues(alpha: 0.72),
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(
-                      color: active ? AppColors.saffron : AppColors.border,
-                      width: active ? 1.8 : 1,
-                    ),
-                  ),
-                  child: Text(
-                    filled ? '•' : '',
-                    style: const TextStyle(
-                      color: AppColors.deepSaffron,
-                      fontSize: 28,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                );
-              }),
-            ),
-            const SizedBox(height: 18),
-            if (_error != null) ...[
-              Text(
-                _error!,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: AppColors.error,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 12),
-            ],
-            AnimatedSwitcher(
-              duration: MotionSpec.micro,
-              child: _verifying
-                  ? const Text(
-                      'లోడ్ అవుతోంది...',
-                      key: ValueKey('verifying'),
-                      style: TextStyle(
-                        color: AppColors.deepSaffron,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    )
-                  : TextButton(
-                      key: const ValueKey('change-phone'),
-                      onPressed: widget.onChangePhone,
-                      child: const Text('నంబర్ మార్చండి'),
-                    ),
-            ),
-          ],
-        ),
-      ),
-      keypad: NumberPad(onDigit: _append, onBackspace: _backspace),
     );
   }
 }
@@ -1215,6 +1146,7 @@ class V2MainShell extends StatelessWidget {
     required this.onRetryContent,
     required this.onToggleBookmark,
     required this.onLogout,
+    required this.onDeleteAccount,
   });
 
   final _ShellTab tab;
@@ -1235,6 +1167,7 @@ class V2MainShell extends StatelessWidget {
   final Future<void> Function() onRetryContent;
   final ValueChanged<String> onToggleBookmark;
   final VoidCallback onLogout;
+  final Future<void> Function() onDeleteAccount;
 
   @override
   Widget build(BuildContext context) {
@@ -1273,6 +1206,7 @@ class V2MainShell extends StatelessWidget {
         streakDays: streakDays,
         completedCount: completedEpisodeIds.length,
         onLogout: onLogout,
+        onDeleteAccount: onDeleteAccount,
       ),
     };
 
@@ -3276,12 +3210,14 @@ class ProfileScreenV2 extends StatelessWidget {
     required this.streakDays,
     required this.completedCount,
     required this.onLogout,
+    required this.onDeleteAccount,
   });
 
   final int points;
   final int streakDays;
   final int completedCount;
   final VoidCallback onLogout;
+  final Future<void> Function() onDeleteAccount;
 
   @override
   Widget build(BuildContext context) {
@@ -3366,11 +3302,185 @@ class ProfileScreenV2 extends StatelessWidget {
                 ),
                 const SizedBox(height: 10),
                 MinimalSettingTile(
+                  icon: Icons.privacy_tip_rounded,
+                  title: 'Privacy Policy',
+                  subtitle: 'Phone, progress, rewards, and account data',
+                  onTap: () => Navigator.of(context).push(
+                    CinematicRoute<void>(
+                      builder: (_) => const PrivacyPolicyScreen(),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                MinimalSettingTile(
+                  icon: Icons.delete_forever_rounded,
+                  title: 'Delete Account',
+                  subtitle: 'Permanently remove your Daily Katha profile',
+                  onTap: () => _confirmDeleteAccount(context),
+                ),
+                const SizedBox(height: 10),
+                MinimalSettingTile(
                   icon: Icons.logout_rounded,
                   title: 'Logout',
                   subtitle: 'Sign out from this device',
                   onTap: onLogout,
                 ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _confirmDeleteAccount(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete account?'),
+        content: const Text(
+          'This permanently removes your phone login, reading progress, quiz attempts, points, streaks, and rewards from Daily Katha.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !context.mounted) return;
+    try {
+      await onDeleteAccount();
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Account deleted'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not delete account: $error'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+}
+
+class PrivacyPolicyScreen extends StatelessWidget {
+  const PrivacyPolicyScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Stack(
+        children: [
+          const ParchmentBackdrop(glow: 0.2, bellOffset: 0),
+          SafeArea(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(20, 22, 20, 28),
+              children: [
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: FrostedIconButton(
+                    icon: Icons.arrow_back_rounded,
+                    onTap: () => Navigator.of(context).pop(),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Text(
+                  'Privacy Policy',
+                  style: Theme.of(context).textTheme.headlineMedium,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Daily Katha uses only the data needed to run your reading profile.',
+                  style: Theme.of(context).textTheme.bodyLarge,
+                ),
+                const SizedBox(height: 18),
+                const PolicyPoint(
+                  icon: Icons.phone_android_rounded,
+                  title: 'Account data',
+                  body:
+                      'We use your phone number and optional name to create your Daily Katha profile and keep you signed in.',
+                ),
+                const SizedBox(height: 10),
+                const PolicyPoint(
+                  icon: Icons.menu_book_rounded,
+                  title: 'Reading progress',
+                  body:
+                      'We save story progress, completed days, quiz attempts, points, streaks, and rewards so your app can continue where you left off.',
+                ),
+                const SizedBox(height: 10),
+                const PolicyPoint(
+                  icon: Icons.lock_rounded,
+                  title: 'Security',
+                  body:
+                      'The app connects to the Daily Katha CMS over HTTPS and stores the login token securely on your device.',
+                ),
+                const SizedBox(height: 10),
+                const PolicyPoint(
+                  icon: Icons.delete_forever_rounded,
+                  title: 'Deletion',
+                  body:
+                      'You can delete your account from Profile. This removes your account and related app progress from Daily Katha.',
+                ),
+                const SizedBox(height: 18),
+                Text(
+                  'Before Play Store release, publish this same policy on a public web page and add that URL in Play Console.',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppColors.mutedBrown,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class PolicyPoint extends StatelessWidget {
+  const PolicyPoint({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.body,
+  });
+
+  final IconData icon;
+  final String title;
+  final String body;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: cinematicCardDecoration(radius: 22),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: AppColors.saffron),
+          const SizedBox(width: 13),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 5),
+                Text(body, style: Theme.of(context).textTheme.bodyMedium),
               ],
             ),
           ),

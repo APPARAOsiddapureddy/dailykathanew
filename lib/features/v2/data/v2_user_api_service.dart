@@ -52,6 +52,10 @@ class V2UserApiService {
       'lastPhotoIndex': lastPhotoIndex,
     });
   }
+
+  Future<void> deleteAccount() async {
+    await _client.deleteJson('/api/users/me');
+  }
 }
 
 class PhoneCheckResult {
