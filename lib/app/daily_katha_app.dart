@@ -1,18 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
-import '../features/v2/daily_katha_v2_experience.dart';
-import 'theme.dart';
+import '../features/redesign/data/mock_data.dart';
+import '../features/redesign/screens/onboarding/splash_screen.dart';
+import '../features/redesign/theme/redesign_theme.dart';
 
 class DailyKathaApp extends StatelessWidget {
   const DailyKathaApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'Daily Katha',
-      theme: DailyKathaTheme.light,
-      home: const DailyKathaV2Experience(),
+    return ChangeNotifierProvider(
+      create: (_) => AppState(),
+      child: MaterialApp(
+        debugShowCheckedModeBanner: false,
+        title: 'Daily Katha',
+        theme: redesignTheme,
+        home: const SplashScreen(),
+      ),
     );
   }
 }
