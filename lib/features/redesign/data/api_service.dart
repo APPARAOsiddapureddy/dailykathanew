@@ -1,8 +1,11 @@
 import 'dart:convert';
+
 import 'package:http/http.dart' as http;
 
+import '../../../app/config.dart';
+
 class ApiService {
-  static const String baseUrl = 'https://daily-katha-cms.onrender.com/api';
+  static String get baseUrl => '${AppConfig.apiBaseUrl}/api';
   String? _authToken;
 
   void setAuthToken(String token) {

@@ -2,7 +2,7 @@
   const AppConfig._();
 
   static const String apiBaseUrl = String.fromEnvironment(
-    'DAILY_KATHA_API_BASE_URL',
-    defaultValue: 'http://localhost:4000',
+    'API_BASE_URL',
+    defaultValue: 'https://daily-katha-cms.onrender.com',
   );
 }

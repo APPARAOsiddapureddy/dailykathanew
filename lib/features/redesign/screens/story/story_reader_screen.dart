@@ -21,6 +21,16 @@ class _StoryReaderScreenState extends State<StoryReaderScreen> {
   int _currentIndex = 0;
   bool _isLoading = true;
 
+  String? _proxiedImageUrl(String? rawUrl) {
+    if (rawUrl == null || rawUrl.isEmpty) {
+      return null;
+    }
+    if (!rawUrl.startsWith('http')) {
+      return rawUrl;
+    }
+    return '${ApiService.baseUrl}/app/image-proxy?url=${Uri.encodeComponent(rawUrl)}';
+  }
+
   @override
   void initState() {
     super.initState();
@@ -37,7 +47,7 @@ class _StoryReaderScreenState extends State<StoryReaderScreen> {
 
       widget.episode.cards = photosData.map((p) => StoryCard(
         id: p['id'],
-        imageUrl: p['imageUrl'],
+        imageUrl: _proxiedImageUrl(p['imageUrl']),
         order: p['order'] ?? 0,
       )).toList();
 
@@ -51,7 +61,7 @@ class _StoryReaderScreenState extends State<StoryReaderScreen> {
       }).toList();
 
     } catch (e) {
-      print('Error fetching story day details: $e');
+      debugPrint('Error fetching story day details: $e');
     } finally {
       if (mounted) {
         setState(() {
@@ -168,7 +178,16 @@ class _StoryReaderScreenState extends State<StoryReaderScreen> {
                         Expanded(
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(16),
-                            child: Image.network(card.imageUrl!, fit: BoxFit.contain),
+                            child: Image.network(
+                              card.imageUrl!,
+                              fit: BoxFit.contain,
+                              errorBuilder: (_, __, ___) => const Center(
+                                child: Text(
+                                  'Image not available',
+                                  style: TextStyle(color: AppColors.ivoryLight),
+                                ),
+                              ),
+                            ),
                           ),
                         )
                       else
