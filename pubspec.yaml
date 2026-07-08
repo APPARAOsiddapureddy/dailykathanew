@@ -29,11 +29,10 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
-<<<<<<< Updated upstream
   flutter_secure_storage: ^10.3.1
-=======
   provider: ^6.1.5+1
->>>>>>> Stashed changes
+  http: ^1.6.0
+  shared_preferences: ^2.5.5
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -69,3 +68,5 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+

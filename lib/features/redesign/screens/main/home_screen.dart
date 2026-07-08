@@ -5,22 +5,23 @@ import '../../data/mock_data.dart';
 import '../story/universe_detail_screen.dart';
 
 class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key});
+  final VoidCallback? onNavigateToExplore;
+  const HomeScreen({super.key, this.onNavigateToExplore});
 
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final isTelugu = state.language == AppLanguage.telugu;
     final activeJourney = state.activeJourney;
+    final journeys = state.currentJourneys;
 
     return SafeArea(
       child: ListView(
         padding: const EdgeInsets.only(left: 20, right: 20, top: 8, bottom: 8),
         children: [
-          // ── Top bar: OM logo + title + streak (NO search) ──
+          // ── Top bar: OM logo + title + streak ──
           Row(
             children: [
-              // OM icon in gradient rounded square
               Container(
                 width: 38,
                 height: 38,
@@ -45,10 +46,9 @@ class HomeScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 10),
-              // Title
-              Text(
-                isTelugu ? 'డైలీ కథ' : 'Daily Katha',
-                style: const TextStyle(
+              const Text(
+                'Daily Katha',
+                style: TextStyle(
                   fontSize: 19,
                   fontWeight: FontWeight.w600,
                   fontFamily: 'Noto Serif Telugu',
@@ -56,26 +56,17 @@ class HomeScreen extends StatelessWidget {
                 ),
               ),
               const Spacer(),
-              // Streak badge
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
                 decoration: BoxDecoration(
                   color: const Color(0xFFFBEAD2),
                   borderRadius: BorderRadius.circular(99),
-                  border: Border.all(
-                    color: const Color(0xFFEAD3A8),
-                    width: 1,
-                  ),
+                  border: Border.all(color: const Color(0xFFEAD3A8), width: 1),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(
-                      Icons.local_fire_department,
-                      size: 15,
-                      color: Color(0xFFE0701C),
-                    ),
+                    const Icon(Icons.local_fire_department, size: 15, color: Color(0xFFE0701C)),
                     const SizedBox(width: 4),
                     Text(
                       '${state.streak}',
@@ -105,7 +96,7 @@ class HomeScreen extends StatelessWidget {
           ),
           const SizedBox(height: 2),
           Text(
-            isTelugu ? 'ప్రియ గారు 🪔' : 'Priya Sharma 🪔',
+            '${state.userName} 🪔',
             style: const TextStyle(
               fontSize: 24,
               fontWeight: FontWeight.w600,
@@ -121,8 +112,7 @@ class HomeScreen extends StatelessWidget {
             onTap: () {
               Navigator.of(context).push(
                 MaterialPageRoute(
-                  builder: (_) =>
-                      UniverseDetailScreen(journey: activeJourney),
+                  builder: (_) => UniverseDetailScreen(journey: activeJourney),
                 ),
               );
             },
@@ -159,6 +149,19 @@ class HomeScreen extends StatelessWidget {
                       ),
                     ),
 
+                    // Cover image overlay if available
+                    if (activeJourney.coverAsset.startsWith('http'))
+                      Positioned.fill(
+                        child: Opacity(
+                          opacity: 0.15,
+                          child: Image.network(
+                            activeJourney.coverAsset,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                          ),
+                        ),
+                      ),
+
                     // OM watermark
                     Positioned(
                       top: -6,
@@ -181,10 +184,8 @@ class HomeScreen extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Tag pill
                           Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 5),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                             decoration: BoxDecoration(
                               color: const Color(0xFF3C0F0C).withValues(alpha: 0.32),
                               borderRadius: BorderRadius.circular(99),
@@ -204,7 +205,6 @@ class HomeScreen extends StatelessWidget {
 
                           const SizedBox(height: 34),
 
-                          // Journey title
                           Text(
                             activeJourney.title,
                             style: const TextStyle(
@@ -217,11 +217,10 @@ class HomeScreen extends StatelessWidget {
 
                           const SizedBox(height: 2),
 
-                          // Sub info
                           Text(
                             isTelugu
-                                ? 'అయోధ్య కాండం · రోజు 12'
-                                : 'Ayodhya Kanda · Day 12',
+                                ? '${activeJourney.totalDays} రోజులు'
+                                : '${activeJourney.totalDays} Days',
                             style: const TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w400,
@@ -232,45 +231,47 @@ class HomeScreen extends StatelessWidget {
 
                           const SizedBox(height: 12),
 
-                          // Progress bar row
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Container(
-                                  height: 7,
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFFFF0D6)
-                                        .withValues(alpha: 0.28),
-                                    borderRadius: BorderRadius.circular(99),
-                                  ),
-                                  alignment: Alignment.centerLeft,
-                                  child: FractionallySizedBox(
-                                    widthFactor: 0.12,
+                          // Progress bar
+                          Builder(
+                            builder: (context) {
+                              final daysCompleted = state.getCompletedDaysForStory(activeJourney.id);
+                              return Row(
+                                children: [
+                                  Expanded(
                                     child: Container(
+                                      height: 7,
                                       decoration: BoxDecoration(
-                                        gradient: const LinearGradient(
-                                          colors: [
-                                            Color(0xFFFFE0A0),
-                                            Color(0xFFFFF3DC),
-                                          ],
+                                        color: const Color(0xFFFFF0D6).withValues(alpha: 0.28),
+                                        borderRadius: BorderRadius.circular(99),
+                                      ),
+                                      alignment: Alignment.centerLeft,
+                                      child: FractionallySizedBox(
+                                        widthFactor: activeJourney.totalDays > 0
+                                            ? (daysCompleted / activeJourney.totalDays).clamp(0.0, 1.0)
+                                            : 0.0,
+                                        child: Container(
+                                          decoration: BoxDecoration(
+                                            gradient: const LinearGradient(
+                                              colors: [Color(0xFFFFE0A0), Color(0xFFFFF3DC)],
+                                            ),
+                                            borderRadius: BorderRadius.circular(99),
+                                          ),
                                         ),
-                                        borderRadius:
-                                            BorderRadius.circular(99),
                                       ),
                                     ),
                                   ),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              const Text(
-                                '12/100',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                  color: Color(0xFFFFF0D2),
-                                ),
-                              ),
-                            ],
+                                  const SizedBox(width: 10),
+                                  Text(
+                                    '$daysCompleted/${activeJourney.totalDays}',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFFFFF0D2),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
                           ),
 
                           const SizedBox(height: 16),
@@ -282,16 +283,14 @@ class HomeScreen extends StatelessWidget {
                               onPressed: () {
                                 Navigator.of(context).push(
                                   MaterialPageRoute(
-                                    builder: (_) => UniverseDetailScreen(
-                                        journey: activeJourney),
+                                    builder: (_) => UniverseDetailScreen(journey: activeJourney),
                                   ),
                                 );
                               },
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: const Color(0xFFFFF6E7),
                                 foregroundColor: const Color(0xFFB4480F),
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 13),
+                                padding: const EdgeInsets.symmetric(vertical: 13),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(13),
                                 ),
@@ -338,13 +337,16 @@ class HomeScreen extends StatelessWidget {
                   color: Color(0xFF6B1F22),
                 ),
               ),
-              Text(
-                isTelugu ? 'అన్నీ' : 'All',
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  fontFamily: 'Noto Sans Telugu',
-                  color: Color(0xFFB07A2A),
+              GestureDetector(
+                onTap: onNavigateToExplore,
+                child: Text(
+                  isTelugu ? 'అన్నీ' : 'All',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    fontFamily: 'Noto Sans Telugu',
+                    color: Color(0xFFB07A2A),
+                  ),
                 ),
               ),
             ],
@@ -352,39 +354,36 @@ class HomeScreen extends StatelessWidget {
 
           const SizedBox(height: 12),
 
-          // ── Two explore cards side by side ──
-          Row(
-            children: [
-              // Mahabharatam card — blue gradient
-              Expanded(
-                child: _ExploreCard(
-                  title: isTelugu ? 'మహాభారతం' : 'Mahabharatam',
-                  subtitle: isTelugu ? '180 రోజులు' : '180 Days',
-                  subtitleColor: const Color(0xFFCFE0F2),
-                  gradientColors: const [
-                    Color(0xFF7FA8C9),
-                    Color(0xFF3C5E86),
-                    Color(0xFF1E2E4A),
-                  ],
-                  overlayColor: const Color(0xFF0F1428),
-                ),
-              ),
-              const SizedBox(width: 12),
-              // Bhagavatam card — green gradient
-              Expanded(
-                child: _ExploreCard(
-                  title: isTelugu ? 'భాగవతం' : 'Bhagavatam',
-                  subtitle: isTelugu ? '120 రోజులు' : '120 Days',
-                  subtitleColor: const Color(0xFFCDEBD8),
-                  gradientColors: const [
-                    Color(0xFF8FCFA8),
-                    Color(0xFF3E8C63),
-                    Color(0xFF1C4A34),
-                  ],
-                  overlayColor: const Color(0xFF0C241A),
-                ),
-              ),
-            ],
+          // ── Dynamic explore cards ──
+          SizedBox(
+            height: 160,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: journeys.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              itemBuilder: (context, index) {
+                final journey = journeys[index];
+                return GestureDetector(
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => UniverseDetailScreen(journey: journey),
+                      ),
+                    );
+                  },
+                  child: _ExploreCard(
+                    title: journey.title,
+                    subtitle: isTelugu
+                        ? '${journey.totalDays} రోజులు'
+                        : '${journey.totalDays} Days',
+                    coverImageUrl: journey.coverAsset.startsWith('http')
+                        ? journey.coverAsset
+                        : null,
+                    colorIndex: index,
+                  ),
+                );
+              },
+            ),
           ),
         ],
       ),
@@ -395,43 +394,50 @@ class HomeScreen extends StatelessWidget {
 class _ExploreCard extends StatelessWidget {
   final String title;
   final String subtitle;
-  final Color subtitleColor;
-  final List<Color> gradientColors;
-  final Color overlayColor;
+  final String? coverImageUrl;
+  final int colorIndex;
+
+  static const _gradients = [
+    [Color(0xFF7FA8C9), Color(0xFF3C5E86), Color(0xFF1E2E4A)], // blue
+    [Color(0xFF8FCFA8), Color(0xFF3E8C63), Color(0xFF1C4A34)], // green
+    [Color(0xFFD4A06A), Color(0xFF8C5A2E), Color(0xFF4A2C14)], // brown
+    [Color(0xFFC9A07F), Color(0xFF86603C), Color(0xFF4A351E)], // warm
+  ];
 
   const _ExploreCard({
     required this.title,
     required this.subtitle,
-    required this.subtitleColor,
-    required this.gradientColors,
-    required this.overlayColor,
+    this.coverImageUrl,
+    required this.colorIndex,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 132,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-      ),
+    final colors = _gradients[colorIndex % _gradients.length];
+
+    return SizedBox(
+      width: 160,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(16),
         child: Stack(
           children: [
-            // Radial gradient background
+            // Cover image
             Positioned.fill(
-              child: Container(
-                decoration: BoxDecoration(
-                  gradient: RadialGradient(
-                    center: const Alignment(0.0, -0.76),
-                    radius: 1.2,
-                    colors: gradientColors,
-                    stops: const [0.0, 0.65, 1.0],
-                  ),
-                ),
-              ),
+              child: coverImageUrl != null && coverImageUrl!.startsWith('http')
+                  ? Image.network(
+                      coverImageUrl!,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Image.asset(
+                        'assets/mahabharatam-cover.png',
+                        fit: BoxFit.cover,
+                      ),
+                    )
+                  : Image.asset(
+                      coverImageUrl ?? 'assets/mahabharatam-cover.png',
+                      fit: BoxFit.cover,
+                    ),
             ),
-            // Dark bottom overlay
+            // Gradient Overlay
             Positioned.fill(
               child: Container(
                 decoration: BoxDecoration(
@@ -439,10 +445,11 @@ class _ExploreCard extends StatelessWidget {
                     begin: Alignment.bottomCenter,
                     end: Alignment.topCenter,
                     colors: [
-                      overlayColor.withValues(alpha: 0.9),
+                      colors[2].withValues(alpha: 0.9), // Darkest color from palette
+                      colors[1].withValues(alpha: 0.5), // Mid color
                       Colors.transparent,
                     ],
-                    stops: const [0.0, 0.6],
+                    stops: const [0.0, 0.5, 0.9],
                   ),
                 ),
               ),
@@ -463,14 +470,16 @@ class _ExploreCard extends StatelessWidget {
                       fontFamily: 'Noto Serif Telugu',
                       color: Color(0xFFFFF6E7),
                     ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                   Text(
                     subtitle,
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w400,
                       fontFamily: 'Noto Sans Telugu',
-                      color: subtitleColor,
+                      color: Color(0xFFCFE0F2),
                     ),
                   ),
                 ],

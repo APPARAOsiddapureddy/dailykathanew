@@ -2,6 +2,10 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../auth/auth_screens.dart';
+import '../main/main_shell.dart';
 import 'language_screen.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -23,11 +27,21 @@ class _SplashScreenState extends State<SplashScreen>
       duration: const Duration(milliseconds: 1400),
     )..repeat();
 
-    Future.delayed(const Duration(seconds: 4), () {
+    Future.delayed(const Duration(seconds: 4), () async {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('auth_token');
       if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const LanguageScreen()),
-        );
+        if (token != null && token.isNotEmpty) {
+          // User has a stored token — go to home
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (_) => const MainShell()),
+          );
+        } else {
+          // No token — needs to login
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (_) => const PhoneLoginScreen()),
+          );
+        }
       }
     });
   }

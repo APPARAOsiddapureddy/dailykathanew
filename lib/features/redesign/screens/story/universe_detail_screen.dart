@@ -14,6 +14,13 @@ class UniverseDetailScreen extends StatelessWidget {
     final state = context.watch<AppState>();
     final isTelugu = state.language == AppLanguage.telugu;
 
+    // Flatten all episodes from all parts into a single list of days
+    final allEpisodes = <Episode>[];
+    for (final part in journey.parts) {
+      allEpisodes.addAll(part.episodes);
+    }
+    allEpisodes.sort((a, b) => a.dayNumber.compareTo(b.dayNumber));
+
     return Scaffold(
       backgroundColor: AppColors.warmIvory,
       body: CustomScrollView(
@@ -21,12 +28,50 @@ class UniverseDetailScreen extends StatelessWidget {
           SliverAppBar(
             expandedHeight: 300,
             pinned: true,
+            backgroundColor: const Color(0xFF6B1F22),
             flexibleSpace: FlexibleSpaceBar(
-              background: Image.asset(
-                journey.coverAsset,
-                fit: BoxFit.cover,
-                color: Colors.black.withOpacity(0.4),
-                colorBlendMode: BlendMode.darken,
+              background: Stack(
+                fit: StackFit.expand,
+                children: [
+                  journey.coverAsset.startsWith('http')
+                      ? Image.network(
+                          journey.coverAsset,
+                          fit: BoxFit.cover,
+                          color: Colors.black.withValues(alpha: 0.4),
+                          colorBlendMode: BlendMode.darken,
+                          errorBuilder: (_, __, ___) => Image.asset(
+                            'assets/mahabharatam-cover.png',
+                            fit: BoxFit.cover,
+                            color: Colors.black.withValues(alpha: 0.4),
+                            colorBlendMode: BlendMode.darken,
+                          ),
+                        )
+                      : Image.asset(
+                          journey.coverAsset,
+                          fit: BoxFit.cover,
+                          color: Colors.black.withValues(alpha: 0.4),
+                          colorBlendMode: BlendMode.darken,
+                        ),
+                  // Bottom gradient for text readability
+                  Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    height: 120,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.transparent,
+                            Colors.black.withValues(alpha: 0.6),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
               title: Column(
                 mainAxisAlignment: MainAxisAlignment.end,
@@ -49,7 +94,9 @@ class UniverseDetailScreen extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    isTelugu ? '12/100 రోజులు' : '12/100 Days',
+                    isTelugu
+                        ? '${allEpisodes.length} రోజులు'
+                        : '${allEpisodes.length} Days',
                     style: const TextStyle(
                       color: AppColors.ivoryLight,
                       fontSize: 12,
@@ -64,84 +111,169 @@ class UniverseDetailScreen extends StatelessWidget {
               onPressed: () => Navigator.of(context).pop(),
             ),
           ),
-          SliverList(
-            delegate: SliverChildBuilderDelegate(
-              (context, index) {
-                final part = journey.parts[index];
-                return _JourneyPartTile(part: part, journey: journey);
-              },
-              childCount: journey.parts.length,
+
+          // Section header
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
+              child: Text(
+                isTelugu ? 'అన్ని రోజులు' : 'All Days',
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.sacredMaroon,
+                  fontFamily: 'Noto Serif Telugu',
+                ),
+              ),
             ),
           ),
+
+          // Day-wise list
+          allEpisodes.isEmpty
+              ? SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.all(48),
+                    child: Center(
+                      child: Text(
+                        isTelugu
+                            ? 'ఈ కథకు ఇంకా రోజులు జోడించబడలేదు'
+                            : 'No days available for this story yet',
+                        style: const TextStyle(
+                          color: AppColors.softBrown,
+                          fontSize: 16,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+                )
+              : SliverList(
+                  delegate: SliverChildBuilderDelegate(
+                    (context, index) {
+                      final episode = allEpisodes[index];
+                      return _DayTile(
+                        episode: episode,
+                        journey: journey,
+                        isTelugu: isTelugu,
+                      );
+                    },
+                    childCount: allEpisodes.length,
+                  ),
+                ),
         ],
       ),
     );
   }
 }
 
-class _JourneyPartTile extends StatelessWidget {
-  final JourneyPart part;
+class _DayTile extends StatelessWidget {
+  final Episode episode;
   final Journey journey;
+  final bool isTelugu;
 
-  const _JourneyPartTile({required this.part, required this.journey});
+  const _DayTile({
+    required this.episode,
+    required this.journey,
+    required this.isTelugu,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final state = context.watch<AppState>();
-    final isTelugu = state.language == AppLanguage.telugu;
+    final dayLabel = isTelugu
+        ? 'రోజు ${episode.dayNumber}'
+        : 'Day ${episode.dayNumber}';
 
-    String subtitle = '';
-    Color statusColor = AppColors.softBrown;
-    IconData? icon;
-
-    if (part.isCompleted) {
-      subtitle = isTelugu ? '${part.totalDays} రోజులు · పూర్తయింది' : '${part.totalDays} Days · Completed';
-      statusColor = Colors.green;
-      icon = Icons.check_circle;
-    } else if (part.isLocked) {
-      subtitle = isTelugu ? '${part.totalDays} రోజులు · లాక్ చేయబడింది' : '${part.totalDays} Days · Locked';
-      statusColor = AppColors.greyText;
-      icon = Icons.lock;
-    } else {
-      subtitle = isTelugu ? '${part.totalDays} రోజులు · రోజు 12 కొనసాగుతోంది' : '${part.totalDays} Days · Day 12 In Progress';
-      statusColor = AppColors.deepSaffron;
-      icon = Icons.play_circle_fill;
-    }
-
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-      title: Text(
-        part.title,
-        style: TextStyle(
-          fontSize: 18,
-          fontWeight: FontWeight.bold,
-          color: part.isLocked ? AppColors.greyText : AppColors.sacredMaroon,
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 5),
+      child: Material(
+        color: const Color(0xFFFFFDF8),
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => StoryReaderScreen(
+                  journey: journey,
+                  episode: episode,
+                ),
+              ),
+            );
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFEADCC2)),
+            ),
+            child: Row(
+              children: [
+                // Day number badge
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      begin: Alignment(-0.4, -1.0),
+                      end: Alignment(0.4, 1.0),
+                      colors: [Color(0xFFF6C25A), Color(0xFFD0641C)],
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    '${episode.dayNumber}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 14),
+                // Day info
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        dayLabel,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF6B1F22),
+                          fontFamily: 'Noto Sans Telugu',
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        episode.title,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFF8B7660),
+                          fontFamily: 'Noto Sans Telugu',
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                // Status icon
+                Icon(
+                  episode.isCompleted
+                      ? Icons.check_circle
+                      : Icons.play_circle_fill,
+                  color: episode.isCompleted
+                      ? Colors.green
+                      : const Color(0xFFE0701C),
+                  size: 28,
+                ),
+              ],
+            ),
+          ),
         ),
       ),
-      subtitle: Row(
-        children: [
-          if (icon != null) ...[
-            Icon(icon, size: 14, color: statusColor),
-            const SizedBox(width: 4),
-          ],
-          Text(
-            subtitle,
-            style: TextStyle(color: statusColor, fontSize: 14),
-          ),
-        ],
-      ),
-      trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: AppColors.softBrown),
-      onTap: part.isLocked
-          ? null
-          : () {
-              if (part.episodes.isNotEmpty) {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => StoryReaderScreen(episode: part.episodes.first),
-                  ),
-                );
-              }
-            },
     );
   }
 }

@@ -1,39 +1,43 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'api_service.dart';
 
 enum AppLanguage { telugu, english }
 
 class QuizOption {
+  final String id;
   final String text;
-  final bool isCorrect;
-  QuizOption(this.text, this.isCorrect);
+  QuizOption({required this.id, required this.text});
 }
 
 class Quiz {
+  final String id;
   final String question;
   final List<QuizOption> options;
-  Quiz({required this.question, required this.options});
+  Quiz({required this.id, required this.question, required this.options});
 }
 
 class StoryCard {
-  final String text;
+  final String id;
   final String? imageUrl;
-  StoryCard({required this.text, this.imageUrl});
+  final int order;
+  StoryCard({required this.id, this.imageUrl, required this.order});
 }
 
 class Episode {
   final String id;
   final int dayNumber;
   final String title;
-  final List<StoryCard> cards;
-  final Quiz? quiz;
+  List<StoryCard> cards;
+  List<Quiz> quizzes;
   bool isCompleted;
 
   Episode({
     required this.id,
     required this.dayNumber,
     required this.title,
-    required this.cards,
-    this.quiz,
+    this.cards = const [],
+    this.quizzes = const [],
     this.isCompleted = false,
   });
 }
@@ -62,6 +66,7 @@ class Journey {
   final String partNamePlural;
   final List<JourneyPart> parts;
   final String coverAsset;
+  final String categoryName;
 
   Journey({
     required this.id,
@@ -71,6 +76,22 @@ class Journey {
     required this.partNamePlural,
     required this.parts,
     required this.coverAsset,
+    this.categoryName = '',
+  });
+}
+
+/// Per-story progress from backend
+class StoryProgressInfo {
+  final String storyId;
+  final int completedDaysCount;
+  final int? lastOpenedDayNumber;
+  final bool isCompleted;
+
+  StoryProgressInfo({
+    required this.storyId,
+    required this.completedDaysCount,
+    this.lastOpenedDayNumber,
+    this.isCompleted = false,
   });
 }
 
@@ -78,151 +99,256 @@ class AppState extends ChangeNotifier {
   AppLanguage _language = AppLanguage.telugu;
   AppLanguage get language => _language;
 
-  String get userName => "Priya Sharma";
-  int get streak => 12;
+  String _userName = "";
+  String get userName => _userName;
+
+  int _streak = 0;
+  int get streak => _streak;
+
+  int _points = 0;
+  int get points => _points;
+
+  List<Journey> _journeys = [];
+  bool _isLoading = false;
+  bool get isLoading => _isLoading;
+
+  String? _authToken;
+  String? get authToken => _authToken;
+  bool get isLoggedIn => _authToken != null && _authToken!.isNotEmpty;
+
+  // User-specific progress
+  Map<String, StoryProgressInfo> _storyProgressMap = {};
+  Set<String> _completedDayIds = {};
+
+  /// Total completed days across all stories for this user
+  int get completedDays {
+    int total = 0;
+    for (final sp in _storyProgressMap.values) {
+      total += sp.completedDaysCount;
+    }
+    return total;
+  }
+
+  /// Number of stories the user has started
+  int get storiesStarted => _storyProgressMap.length;
+
+  /// Get progress for a specific story
+  StoryProgressInfo? getStoryProgress(String storyId) => _storyProgressMap[storyId];
+
+  /// Check if a specific day is completed
+  bool isDayCompleted(String storyDayId) => _completedDayIds.contains(storyDayId);
+
+  /// Get completed days count for a specific story
+  int getCompletedDaysForStory(String storyId) {
+    return _storyProgressMap[storyId]?.completedDaysCount ?? 0;
+  }
+
+  AppState() {
+    _initUser();
+    fetchData();
+  }
+
+  Future<void> _initUser() async {
+    final prefs = await SharedPreferences.getInstance();
+    _userName = prefs.getString('user_name') ?? "Guest";
+    _authToken = prefs.getString('auth_token');
+    if (_authToken != null && _authToken!.isNotEmpty) {
+      apiService.setAuthToken(_authToken!);
+      await _fetchUserProfile();
+    }
+    notifyListeners();
+  }
+
+  Future<void> _fetchUserProfile() async {
+    try {
+      final data = await apiService.getMe();
+      final user = data['user'];
+      if (user != null) {
+        _userName = user['name'] ?? _userName;
+        _streak = user['currentStreak'] ?? 0;
+        _points = user['points'] ?? 0;
+        notifyListeners();
+      }
+      await _fetchProgress();
+    } catch (e) {
+      debugPrint('Error fetching user profile: $e');
+      // Token may be expired — clear it
+      if (e.toString().contains('401') || e.toString().contains('Invalid')) {
+        await _clearAuth();
+      }
+    }
+  }
+
+  Future<void> _fetchProgress() async {
+    if (!isLoggedIn) return;
+    try {
+      final data = await apiService.getProgress();
+      final storyProgress = (data['storyProgress'] as List?) ?? [];
+      final kathaProgress = (data['kathaProgress'] as List?) ?? [];
+
+      _storyProgressMap = {};
+      for (final sp in storyProgress) {
+        final storyId = sp['storyId'] as String;
+        _storyProgressMap[storyId] = StoryProgressInfo(
+          storyId: storyId,
+          completedDaysCount: sp['completedDaysCount'] ?? 0,
+          lastOpenedDayNumber: sp['lastOpenedDayNumber'],
+          isCompleted: sp['completedAt'] != null,
+        );
+      }
+
+      _completedDayIds = {};
+      for (final kp in kathaProgress) {
+        if (kp['status'] == 'COMPLETED') {
+          _completedDayIds.add(kp['storyDayId'] as String);
+        }
+      }
+
+      // Mark episodes as completed based on progress
+      for (final journey in _journeys) {
+        for (final part in journey.parts) {
+          for (final episode in part.episodes) {
+            episode.isCompleted = _completedDayIds.contains(episode.id);
+          }
+        }
+      }
+
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error fetching progress: $e');
+    }
+  }
+
+  /// Called after successful login/registration
+  Future<void> loginWithSession(String phoneNumber, {String? name}) async {
+    final data = await apiService.createSession(phoneNumber, name: name);
+    _authToken = data['token'];
+    final user = data['user'];
+    if (user != null) {
+      _userName = user['name'] ?? _userName;
+      _streak = user['currentStreak'] ?? 0;
+      _points = user['points'] ?? 0;
+    }
+
+    // Store token + name locally
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('auth_token', _authToken!);
+    await prefs.setString('user_phone', phoneNumber);
+    if (user?['name'] != null) {
+      await prefs.setString('user_name', user['name']);
+    }
+
+    notifyListeners();
+    await _fetchProgress();
+  }
+
+  Future<void> _clearAuth() async {
+    _authToken = null;
+    _storyProgressMap = {};
+    _completedDayIds = {};
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('auth_token');
+    notifyListeners();
+  }
+
+  /// Mark a story day as completed
+  Future<void> completeStoryDay(String storyDayId) async {
+    if (!isLoggedIn) return;
+    try {
+      await apiService.completeStoryDay(storyDayId);
+      await refreshUserData();
+    } catch (e) {
+      debugPrint('Error completing story day: $e');
+    }
+  }
 
   void setLanguage(AppLanguage lang) {
     _language = lang;
     notifyListeners();
   }
 
-  List<Journey> get currentJourneys => _language == AppLanguage.telugu ? _teluguJourneys : _englishJourneys;
+  void updatePoints(int newPoints) {
+    _points += newPoints;
+    notifyListeners();
+  }
+
+  Future<void> fetchData() async {
+    _isLoading = true;
+    notifyListeners();
+    try {
+      final storiesData = await apiService.fetchStories();
+      _journeys = storiesData.map((s) {
+        final days = (s['days'] as List?) ?? [];
+        final episodes = days.map((d) => Episode(
+          id: d['id'],
+          dayNumber: d['dayNumber'],
+          title: d['title'] ?? 'Day ${d['dayNumber']}',
+        )).toList();
+
+        // Use image proxy for S3 URLs to avoid CORS, fallback to local asset
+        String coverAsset = 'assets/mahabharatam-cover.png';
+        final rawUrl = s['coverImageUrl'];
+        if (rawUrl != null && rawUrl.toString().startsWith('http')) {
+          coverAsset = '${ApiService.baseUrl}/app/image-proxy?url=${Uri.encodeComponent(rawUrl)}';
+        }
+
+        return Journey(
+          id: s['id'],
+          title: s['title'] ?? '',
+          description: s['description'] ?? '',
+          totalDays: days.length,
+          partNamePlural: 'Days',
+          parts: [
+            JourneyPart(
+              title: 'All Chapters',
+              totalDays: days.length,
+              episodes: episodes,
+            )
+          ],
+          coverAsset: coverAsset,
+          categoryName: s['category']?['name'] ?? '',
+        );
+      }).toList();
+
+      // If logged in, mark episodes with completion status
+      if (isLoggedIn && _completedDayIds.isNotEmpty) {
+        for (final journey in _journeys) {
+          for (final part in journey.parts) {
+            for (final episode in part.episodes) {
+              episode.isCompleted = _completedDayIds.contains(episode.id);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Error loading journeys: $e');
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// Refresh all user data (call after completing a day, etc.)
+  Future<void> refreshUserData() async {
+    await _fetchUserProfile();
+    await _fetchProgress();
+  }
+
+  List<Journey> get currentJourneys => _journeys.isNotEmpty ? _journeys : _mockFallback();
 
   Journey get activeJourney => currentJourneys.first;
 
-  // MARK: - MOCK DATA (Telugu)
-  final List<Journey> _teluguJourneys = [
-    Journey(
-      id: 'ramayanam',
-      title: 'రామాయణం',
-      description: 'శ్రీరాముని జీవితం నుంచి విలువలు, ధైర్యం, ధర్మం.',
-      totalDays: 100,
-      partNamePlural: '6 కాండలు',
-      coverAsset: 'assets/mahabharatam-cover.png', // Fallback for mock
-      parts: [
-        JourneyPart(
-          title: 'బాల కాండం',
-          totalDays: 20,
-          isCompleted: true,
-          episodes: [],
-        ),
-        JourneyPart(
-          title: 'అయోధ్య కాండం',
-          totalDays: 25,
-          episodes: [
-            Episode(
-              id: 'ayodhya-day-12',
-              dayNumber: 12,
-              title: 'కైకేయి రెండు వరాలు',
-              cards: [
-                StoryCard(text: 'కైకేయి తన రెండు వరాలను కోరింది — భరతునికి పట్టాభిషేకం, రామునికి పద్నాలుగు సంవత్సరాల వనవాసం.'),
-                StoryCard(text: 'మాట తప్పలేని దశరథుడు దుఃఖంతో మౌనమయ్యాడు.'),
-              ],
-              quiz: Quiz(
-                question: 'ఈ రోజు కథ నుండి కైకేయికి రెండు వరాలను ఎవరు ఇచ్చారు?',
-                options: [
-                  QuizOption('దశరథుడు', true),
-                  QuizOption('రావణుడు', false),
-                  QuizOption('భరతుడు', false),
-                  QuizOption('హనుమంతుడు', false),
-                ],
-              ),
-            ),
-          ],
-        ),
-        JourneyPart(
-          title: 'అరణ్య కాండం',
-          totalDays: 20,
-          isLocked: true,
-          episodes: [],
-        ),
-      ],
-    ),
-    Journey(
-      id: 'mahabharatam',
-      title: 'మహాభారతం',
-      description: 'ధర్మం, నిర్ణయం, కుటుంబం, భక్తి గురించి రోజువారీ కథల ప్రయాణం.',
-      totalDays: 180,
-      partNamePlural: '18 పర్వాలు',
-      coverAsset: 'assets/mahabharatam-cover.png',
-      parts: [],
-    ),
-    Journey(
-      id: 'bhagavatam',
-      title: 'భాగవతం',
-      description: 'కృష్ణుని లీలలు మరియు భక్తి కథలు.',
-      totalDays: 120,
-      partNamePlural: '12 స్కంధాలు',
-      coverAsset: 'assets/mahabharatam-cover.png',
-      parts: [],
-    ),
-  ];
-
-  // MARK: - MOCK DATA (English)
-  final List<Journey> _englishJourneys = [
-    Journey(
-      id: 'ramayanam',
-      title: 'Ramayanam',
-      description: 'Values, courage, and dharma from the life of Lord Rama.',
-      totalDays: 100,
-      partNamePlural: '6 Kandas',
-      coverAsset: 'assets/mahabharatam-cover.png',
-      parts: [
-        JourneyPart(
-          title: 'Bala Kanda',
-          totalDays: 20,
-          isCompleted: true,
-          episodes: [],
-        ),
-        JourneyPart(
-          title: 'Ayodhya Kanda',
-          totalDays: 25,
-          episodes: [
-            Episode(
-              id: 'ayodhya-day-12',
-              dayNumber: 12,
-              title: 'Kaikeyi\'s Two Boons',
-              cards: [
-                StoryCard(text: 'Kaikeyi demanded her two boons — coronation for Bharata, and fourteen years of exile for Rama.'),
-                StoryCard(text: 'Bound by his word, Dasharatha fell silent in profound grief.'),
-              ],
-              quiz: Quiz(
-                question: 'Who granted Kaikeyi the two boons in today\'s story?',
-                options: [
-                  QuizOption('Dasharatha', true),
-                  QuizOption('Ravana', false),
-                  QuizOption('Bharata', false),
-                  QuizOption('Hanuman', false),
-                ],
-              ),
-            ),
-          ],
-        ),
-        JourneyPart(
-          title: 'Aranya Kanda',
-          totalDays: 20,
-          isLocked: true,
-          episodes: [],
-        ),
-      ],
-    ),
-    Journey(
-      id: 'mahabharatam',
-      title: 'Mahabharatam',
-      description: 'An epic journey of dharma, choices, family, and devotion.',
-      totalDays: 180,
-      partNamePlural: '18 Parvas',
-      coverAsset: 'assets/mahabharatam-cover.png',
-      parts: [],
-    ),
-    Journey(
-      id: 'bhagavatam',
-      title: 'Bhagavatam',
-      description: 'The divine play of Krishna and tales of devotion.',
-      totalDays: 120,
-      partNamePlural: '12 Skandhas',
-      coverAsset: 'assets/mahabharatam-cover.png',
-      parts: [],
-    ),
-  ];
+  List<Journey> _mockFallback() {
+    return [
+      Journey(
+        id: 'ramayanam',
+        title: 'రామాయణం',
+        description: 'శ్రీరాముని జీవితం నుంచి విలువలు, ధైర్యం, ధర్మం.',
+        totalDays: 100,
+        partNamePlural: '6 కాండలు',
+        coverAsset: 'assets/mahabharatam-cover.png',
+        parts: [],
+      ),
+    ];
+  }
 }

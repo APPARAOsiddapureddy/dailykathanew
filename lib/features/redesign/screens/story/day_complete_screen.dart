@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../data/mock_data.dart';
 import '../../theme/redesign_theme.dart';
+import '../main/main_shell.dart';
 
 class DayCompleteScreen extends StatelessWidget {
   final Episode episode;
@@ -94,7 +95,12 @@ class DayCompleteScreen extends StatelessWidget {
               ),
               const Spacer(),
               ElevatedButton(
-                onPressed: () {},
+                onPressed: () {
+                  Navigator.of(context).pushAndRemoveUntil(
+                    MaterialPageRoute(builder: (_) => const MainShell()),
+                    (route) => false,
+                  );
+                },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.white,
                   foregroundColor: AppColors.deepSaffron,

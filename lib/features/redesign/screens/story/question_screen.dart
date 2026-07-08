@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../data/mock_data.dart';
 import '../../theme/redesign_theme.dart';
+import '../../data/api_service.dart';
 import 'day_complete_screen.dart';
 
 class QuestionScreen extends StatefulWidget {
@@ -17,27 +18,64 @@ class _QuestionScreenState extends State<QuestionScreen> {
   int? _selectedIndex;
   bool _isAnswered = false;
 
-  void _onOptionSelected(int index) {
+  int? _correctIndex;
+
+  void _onOptionSelected(int index, String questionId, String optionId) async {
     if (_isAnswered) return;
     setState(() {
       _selectedIndex = index;
-      _isAnswered = true;
     });
 
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => DayCompleteScreen(episode: widget.episode)),
-        );
-      }
-    });
+    try {
+      final result = await apiService.checkAnswer(questionId, optionId);
+      final isCorrect = result['correct'] == true;
+      final correctOptionId = result['correctOption']?['id'];
+      
+      setState(() {
+        _isAnswered = true;
+        if (!isCorrect && correctOptionId != null) {
+          // Find the index of the correct option
+          final options = widget.episode.quizzes.first.options;
+          _correctIndex = options.indexWhere((o) => o.id == correctOptionId);
+        } else if (isCorrect) {
+          _correctIndex = index;
+          context.read<AppState>().updatePoints(10);
+        }
+      });
+
+      Future.delayed(const Duration(seconds: 2), () async {
+        if (mounted) {
+          // Mark day as complete
+          await context.read<AppState>().completeStoryDay(widget.episode.id);
+          
+          if (mounted) {
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(builder: (_) => DayCompleteScreen(episode: widget.episode)),
+            );
+          }
+        }
+      });
+    } catch (e) {
+      // Handle error gracefully, just proceed
+      setState(() => _isAnswered = true);
+      Future.delayed(const Duration(seconds: 1), () async {
+        if (mounted) {
+          await context.read<AppState>().completeStoryDay(widget.episode.id);
+          if (mounted) {
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(builder: (_) => DayCompleteScreen(episode: widget.episode)),
+            );
+          }
+        }
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final isTelugu = state.language == AppLanguage.telugu;
-    final quiz = widget.episode.quiz!;
+    final quiz = widget.episode.quizzes.first;
 
     return Scaffold(
       backgroundColor: AppColors.warmIvory,
@@ -69,10 +107,11 @@ class _QuestionScreenState extends State<QuestionScreen> {
               Color borderColor = Colors.transparent;
 
               if (_isAnswered) {
-                if (option.isCorrect) {
+                final isThisCorrect = _correctIndex == index;
+                if (isThisCorrect) {
                   bgColor = Colors.green.shade50;
                   borderColor = Colors.green;
-                } else if (isSelected && !option.isCorrect) {
+                } else if (isSelected) {
                   bgColor = Colors.red.shade50;
                   borderColor = Colors.red;
                 }
@@ -84,7 +123,7 @@ class _QuestionScreenState extends State<QuestionScreen> {
               return Padding(
                 padding: const EdgeInsets.only(bottom: 16.0),
                 child: GestureDetector(
-                  onTap: () => _onOptionSelected(index),
+                  onTap: () => _onOptionSelected(index, quiz.id, option.id),
                   child: Container(
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
@@ -126,9 +165,9 @@ class _QuestionScreenState extends State<QuestionScreen> {
                             ),
                           ),
                         ),
-                        if (_isAnswered && option.isCorrect)
+                        if (_isAnswered && _correctIndex == index)
                           const Icon(Icons.check_circle, color: Colors.green),
-                        if (_isAnswered && isSelected && !option.isCorrect)
+                        if (_isAnswered && isSelected && _correctIndex != index)
                           const Icon(Icons.cancel, color: Colors.red),
                       ],
                     ),

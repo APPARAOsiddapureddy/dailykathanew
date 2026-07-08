@@ -66,11 +66,11 @@ class ProfileScreen extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _StatWidget(value: '12', label: isTelugu ? 'రోజులు' : 'Days'),
-              Container(width: 1, height: 40, color: AppColors.softBrown.withOpacity(0.2)),
-              _StatWidget(value: '12', label: isTelugu ? 'వరుస' : 'Streak'),
-              Container(width: 1, height: 40, color: AppColors.softBrown.withOpacity(0.2)),
-              _StatWidget(value: '1', label: isTelugu ? 'ఇతిహాసం' : 'Epic'),
+              _StatWidget(value: '${state.completedDays}', label: isTelugu ? 'రోజులు' : 'Days'),
+              Container(width: 1, height: 40, color: AppColors.softBrown.withValues(alpha: 0.2)),
+              _StatWidget(value: '${state.streak}', label: isTelugu ? 'వరుస' : 'Streak'),
+              Container(width: 1, height: 40, color: AppColors.softBrown.withValues(alpha: 0.2)),
+              _StatWidget(value: '${state.storiesStarted}', label: isTelugu ? 'ఇతిహాసం' : 'Epic'),
             ],
           ),
           const SizedBox(height: 48),
@@ -88,13 +88,22 @@ class ProfileScreen extends StatelessWidget {
             decoration: BoxDecoration(
               color: AppColors.white,
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppColors.sacredMaroon.withOpacity(0.1)),
+              border: Border.all(color: AppColors.sacredMaroon.withValues(alpha: 0.1)),
             ),
             child: Row(
               children: [
                 ClipRRect(
                   borderRadius: BorderRadius.circular(12),
-                  child: Image.asset(state.activeJourney.coverAsset, width: 60, height: 60, fit: BoxFit.cover),
+                  child: state.activeJourney.coverAsset.startsWith('http')
+                      ? Image.network(
+                          state.activeJourney.coverAsset,
+                          width: 60, height: 60, fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => Image.asset(
+                            'assets/mahabharatam-cover.png',
+                            width: 60, height: 60, fit: BoxFit.cover,
+                          ),
+                        )
+                      : Image.asset(state.activeJourney.coverAsset, width: 60, height: 60, fit: BoxFit.cover),
                 ),
                 const SizedBox(width: 16),
                 Expanded(
@@ -111,7 +120,7 @@ class ProfileScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        isTelugu ? '12/100' : '12/100',
+                        '${state.getCompletedDaysForStory(state.activeJourney.id)}/${state.activeJourney.totalDays}',
                         style: const TextStyle(
                           fontSize: 14,
                           color: AppColors.softBrown,
@@ -124,14 +133,6 @@ class ProfileScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 32),
-          _ProfileMenuTile(
-            icon: Icons.favorite_border,
-            title: isTelugu ? 'ఇష్టమైనవి' : 'Favorites',
-          ),
-          _ProfileMenuTile(
-            icon: Icons.history,
-            title: isTelugu ? 'చరిత్ర' : 'History',
-          ),
           _ProfileMenuTile(
             icon: Icons.workspace_premium,
             title: isTelugu ? 'సబ్‌స్క్రిప్షన్' : 'Subscription',

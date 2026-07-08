@@ -13,11 +13,9 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
 
-  final List<Widget> _screens = const [
-    HomeScreen(),
-    ExploreScreen(),
-    ProfileScreen(),
-  ];
+  void _switchTab(int index) {
+    setState(() => _currentIndex = index);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -25,7 +23,11 @@ class _MainShellState extends State<MainShell> {
       backgroundColor: const Color(0xFFFAF4E8),
       body: IndexedStack(
         index: _currentIndex,
-        children: _screens,
+        children: [
+          HomeScreen(onNavigateToExplore: () => _switchTab(1)),
+          const ExploreScreen(),
+          const ProfileScreen(),
+        ],
       ),
       bottomNavigationBar: Container(
         height: 62,
