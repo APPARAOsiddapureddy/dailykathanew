@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/mock_data.dart';
+import '../../theme/redesign_theme.dart';
 import '../story/universe_detail_screen.dart';
+import '../../widgets/story_list_card.dart';
 
 class HomeScreen extends StatelessWidget {
   final VoidCallback? onNavigateToExplore;
@@ -379,12 +381,26 @@ class HomeScreen extends StatelessWidget {
                     coverImageUrl: journey.coverAsset.startsWith('http')
                         ? journey.coverAsset
                         : null,
-                    colorIndex: index,
                   ),
                 );
               },
             ),
           ),
+
+          const SizedBox(height: 32),
+
+          // ── Vertical list section ──
+          Text(
+            isTelugu ? 'మీ ఇతిహాసాలు' : 'Your Epics',
+            style: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: AppColors.sacredMaroon,
+              fontFamily: 'Noto Serif Telugu',
+            ),
+          ),
+          const SizedBox(height: 16),
+          ...journeys.map((journey) => StoryListCard(journey: journey)),
         ],
       ),
     );
@@ -395,26 +411,15 @@ class _ExploreCard extends StatelessWidget {
   final String title;
   final String subtitle;
   final String? coverImageUrl;
-  final int colorIndex;
-
-  static const _gradients = [
-    [Color(0xFF7FA8C9), Color(0xFF3C5E86), Color(0xFF1E2E4A)], // blue
-    [Color(0xFF8FCFA8), Color(0xFF3E8C63), Color(0xFF1C4A34)], // green
-    [Color(0xFFD4A06A), Color(0xFF8C5A2E), Color(0xFF4A2C14)], // brown
-    [Color(0xFFC9A07F), Color(0xFF86603C), Color(0xFF4A351E)], // warm
-  ];
 
   const _ExploreCard({
     required this.title,
     required this.subtitle,
     this.coverImageUrl,
-    required this.colorIndex,
   });
 
   @override
   Widget build(BuildContext context) {
-    final colors = _gradients[colorIndex % _gradients.length];
-
     return SizedBox(
       width: 160,
       child: ClipRRect(
@@ -445,11 +450,11 @@ class _ExploreCard extends StatelessWidget {
                     begin: Alignment.bottomCenter,
                     end: Alignment.topCenter,
                     colors: [
-                      colors[2].withValues(alpha: 0.9), // Darkest color from palette
-                      colors[1].withValues(alpha: 0.5), // Mid color
+                      Colors.black.withValues(alpha: 0.85),
+                      Colors.black.withValues(alpha: 0.4),
                       Colors.transparent,
                     ],
-                    stops: const [0.0, 0.5, 0.9],
+                    stops: const [0.0, 0.4, 0.8],
                   ),
                 ),
               ),
