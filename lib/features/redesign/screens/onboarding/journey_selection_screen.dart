@@ -85,12 +85,25 @@ class _JourneyCard extends StatelessWidget {
           child: Stack(
             children: [
               Positioned.fill(
-                child: Image.asset(
-                  journey.coverAsset,
-                  fit: BoxFit.cover,
-                  color: Colors.black.withOpacity(0.3),
-                  colorBlendMode: BlendMode.darken,
-                ),
+                child: journey.coverAsset.startsWith('http')
+                    ? Image.network(
+                        journey.coverAsset,
+                        fit: BoxFit.cover,
+                        color: Colors.black.withValues(alpha: 0.3),
+                        colorBlendMode: BlendMode.darken,
+                        errorBuilder: (_, __, ___) => Image.asset(
+                          'assets/mahabharatam-cover.png',
+                          fit: BoxFit.cover,
+                          color: Colors.black.withValues(alpha: 0.3),
+                          colorBlendMode: BlendMode.darken,
+                        ),
+                      )
+                    : Image.asset(
+                        journey.coverAsset,
+                        fit: BoxFit.cover,
+                        color: Colors.black.withValues(alpha: 0.3),
+                        colorBlendMode: BlendMode.darken,
+                      ),
               ),
               Padding(
                 padding: const EdgeInsets.all(24.0),

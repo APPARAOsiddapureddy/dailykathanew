@@ -8,6 +8,10 @@ class ApiService {
   static String get baseUrl => '${AppConfig.apiBaseUrl}/api';
   String? _authToken;
 
+  static String proxiedImageUrl(String imageUrl) {
+    return '$baseUrl/app/image-proxy?url=${Uri.encodeComponent(imageUrl)}';
+  }
+
   void setAuthToken(String token) {
     _authToken = token;
   }
@@ -104,6 +108,32 @@ class ApiService {
     } catch (e) {
       throw Exception('Error fetching story day: $e');
     }
+  }
+
+  Future<String?> fetchStoryHeadingImage(
+    String storyId,
+    int firstPublishedDayNumber,
+  ) async {
+    final data = await fetchStoryDay(storyId, firstPublishedDayNumber);
+    final day = data['day'];
+    if (day is Map) {
+      final shareImage = day['shareCardImageUrl']?.toString().trim();
+      if (shareImage != null && shareImage.startsWith('http')) {
+        return shareImage;
+      }
+    }
+
+    final photos = data['photos'];
+    if (photos is List && photos.isNotEmpty) {
+      final firstPhoto = photos.first;
+      if (firstPhoto is Map) {
+        final imageUrl = firstPhoto['imageUrl']?.toString().trim();
+        if (imageUrl != null && imageUrl.startsWith('http')) {
+          return imageUrl;
+        }
+      }
+    }
+    return null;
   }
 
   Future<Map<String, dynamic>> checkAnswer(String questionId, String optionId) async {

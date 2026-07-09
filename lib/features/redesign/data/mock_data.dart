@@ -277,7 +277,7 @@ class AppState extends ChangeNotifier {
     notifyListeners();
     try {
       final storiesData = await apiService.fetchStories();
-      _journeys = storiesData.map((s) {
+      _journeys = await Future.wait(storiesData.map((s) async {
         final days = (s['days'] as List?) ?? [];
         final episodes = days.map((d) => Episode(
           id: d['id'],
@@ -285,11 +285,25 @@ class AppState extends ChangeNotifier {
           title: d['title'] ?? 'Day ${d['dayNumber']}',
         )).toList();
 
-        // Use image proxy for S3 URLs to avoid CORS, fallback to local asset
+        // Prefer the CMS cover. Older stories without one use their first
+        // published day's share image or first photo as the heading image.
         String coverAsset = 'assets/mahabharatam-cover.png';
-        final rawUrl = s['coverImageUrl'];
-        if (rawUrl != null && rawUrl.toString().startsWith('http')) {
-          coverAsset = '${ApiService.baseUrl}/app/image-proxy?url=${Uri.encodeComponent(rawUrl)}';
+        String? rawUrl = s['coverImageUrl']?.toString().trim();
+        if ((rawUrl == null || !rawUrl.startsWith('http')) && days.isNotEmpty) {
+          final firstDayNumber = days.first['dayNumber'];
+          if (firstDayNumber is int) {
+            try {
+              rawUrl = await apiService.fetchStoryHeadingImage(
+                s['id'].toString(),
+                firstDayNumber,
+              );
+            } catch (error) {
+              debugPrint('Error loading heading image for ${s['title']}: $error');
+            }
+          }
+        }
+        if (rawUrl != null && rawUrl.startsWith('http')) {
+          coverAsset = ApiService.proxiedImageUrl(rawUrl);
         }
 
         return Journey(
@@ -308,7 +322,7 @@ class AppState extends ChangeNotifier {
           coverAsset: coverAsset,
           categoryName: s['category']?['name'] ?? '',
         );
-      }).toList();
+      }));
 
       // If logged in, mark episodes with completion status
       if (isLoggedIn && _completedDayIds.isNotEmpty) {

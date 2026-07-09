@@ -4,7 +4,26 @@ import 'package:provider/provider.dart';
 import '../../data/mock_data.dart';
 import '../../theme/redesign_theme.dart';
 import '../../data/api_service.dart';
-import 'day_complete_screen.dart';
+import 'quiz_results_screen.dart';
+
+/// Stores the result of a single answered question.
+class AnsweredQuestion {
+  final String questionText;
+  final String userOptionId;
+  final String userOptionText;
+  final String correctOptionId;
+  final String correctOptionText;
+  final bool isCorrect;
+
+  AnsweredQuestion({
+    required this.questionText,
+    required this.userOptionId,
+    required this.userOptionText,
+    required this.correctOptionId,
+    required this.correctOptionText,
+    required this.isCorrect,
+  });
+}
 
 class QuestionScreen extends StatefulWidget {
   final Episode episode;
@@ -15,59 +34,93 @@ class QuestionScreen extends StatefulWidget {
 }
 
 class _QuestionScreenState extends State<QuestionScreen> {
+  int _currentQuestionIndex = 0;
   int? _selectedIndex;
   bool _isAnswered = false;
-
   int? _correctIndex;
+
+  // Track all answered questions for the results screen
+  final List<AnsweredQuestion> _answeredQuestions = [];
+
+  Quiz get _currentQuiz => widget.episode.quizzes[_currentQuestionIndex];
+  int get _totalQuestions => widget.episode.quizzes.length;
 
   void _onOptionSelected(int index, String questionId, String optionId) async {
     if (_isAnswered) return;
-    setState(() {
-      _selectedIndex = index;
-    });
+    setState(() => _selectedIndex = index);
 
     try {
       final result = await apiService.checkAnswer(questionId, optionId);
       final isCorrect = result['correct'] == true;
-      final correctOptionId = result['correctOption']?['id'];
-      
+      final correctOption = result['correctOption'];
+      final correctOptionId = correctOption?['id'] as String? ?? '';
+      final correctOptionText = correctOption?['text'] as String? ?? '';
+
+      int correctIdx = index;
+      if (!isCorrect && correctOptionId.isNotEmpty) {
+        correctIdx = _currentQuiz.options.indexWhere((o) => o.id == correctOptionId);
+      }
+
+      // Record this answer
+      _answeredQuestions.add(AnsweredQuestion(
+        questionText: _currentQuiz.question,
+        userOptionId: optionId,
+        userOptionText: _currentQuiz.options[index].text,
+        correctOptionId: correctOptionId,
+        correctOptionText: correctOptionText.isNotEmpty
+            ? correctOptionText
+            : (correctIdx >= 0 ? _currentQuiz.options[correctIdx].text : ''),
+        isCorrect: isCorrect,
+      ));
+
       setState(() {
         _isAnswered = true;
-        if (!isCorrect && correctOptionId != null) {
-          // Find the index of the correct option
-          final options = widget.episode.quizzes.first.options;
-          _correctIndex = options.indexWhere((o) => o.id == correctOptionId);
-        } else if (isCorrect) {
-          _correctIndex = index;
-          context.read<AppState>().updatePoints(10);
-        }
+        _correctIndex = correctIdx;
       });
 
-      Future.delayed(const Duration(seconds: 2), () async {
-        if (mounted) {
-          // Mark day as complete
-          await context.read<AppState>().completeStoryDay(widget.episode.id);
-          
-          if (mounted) {
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(builder: (_) => DayCompleteScreen(episode: widget.episode)),
-            );
-          }
-        }
-      });
+      if (isCorrect) {
+        context.read<AppState>().updatePoints(10);
+      }
     } catch (e) {
-      // Handle error gracefully, just proceed
-      setState(() => _isAnswered = true);
-      Future.delayed(const Duration(seconds: 1), () async {
-        if (mounted) {
-          await context.read<AppState>().completeStoryDay(widget.episode.id);
-          if (mounted) {
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(builder: (_) => DayCompleteScreen(episode: widget.episode)),
-            );
-          }
-        }
+      // On error, still record and move on
+      _answeredQuestions.add(AnsweredQuestion(
+        questionText: _currentQuiz.question,
+        userOptionId: optionId,
+        userOptionText: _currentQuiz.options[index].text,
+        correctOptionId: '',
+        correctOptionText: '',
+        isCorrect: false,
+      ));
+      setState(() {
+        _isAnswered = true;
+        _correctIndex = null;
       });
+    }
+  }
+
+  void _goToNextQuestion() async {
+    if (_currentQuestionIndex < _totalQuestions - 1) {
+      // Next question
+      setState(() {
+        _currentQuestionIndex++;
+        _selectedIndex = null;
+        _isAnswered = false;
+        _correctIndex = null;
+      });
+    } else {
+      // All questions done — mark day as complete and show results
+      await context.read<AppState>().completeStoryDay(widget.episode.id);
+
+      if (mounted) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (_) => QuizResultsScreen(
+              episode: widget.episode,
+              answeredQuestions: _answeredQuestions,
+            ),
+          ),
+        );
+      }
     }
   }
 
@@ -75,12 +128,14 @@ class _QuestionScreenState extends State<QuestionScreen> {
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final isTelugu = state.language == AppLanguage.telugu;
-    final quiz = widget.episode.quizzes.first;
+    final quiz = _currentQuiz;
 
     return Scaffold(
       backgroundColor: AppColors.warmIvory,
       appBar: AppBar(
-        title: Text(isTelugu ? 'ప్రశ్న' : 'Question'),
+        title: Text(
+          '${isTelugu ? 'ప్రశ్న' : 'Question'} ${_currentQuestionIndex + 1}/$_totalQuestions',
+        ),
         centerTitle: true,
       ),
       body: Padding(
@@ -88,23 +143,51 @@ class _QuestionScreenState extends State<QuestionScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // Question counter bar
+            Row(
+              children: List.generate(_totalQuestions, (i) {
+                Color barColor;
+                if (i < _answeredQuestions.length) {
+                  barColor = _answeredQuestions[i].isCorrect ? Colors.green : Colors.red;
+                } else if (i == _currentQuestionIndex) {
+                  barColor = AppColors.deepSaffron;
+                } else {
+                  barColor = const Color(0xFFEADCC2);
+                }
+                return Expanded(
+                  child: Container(
+                    height: 4,
+                    margin: EdgeInsets.only(right: i < _totalQuestions - 1 ? 4 : 0),
+                    decoration: BoxDecoration(
+                      color: barColor,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                );
+              }),
+            ),
+            const SizedBox(height: 32),
+
+            // Question text
             Text(
               quiz.question,
               style: const TextStyle(
-                fontSize: 24,
+                fontSize: 22,
                 color: AppColors.sacredMaroon,
                 fontWeight: FontWeight.bold,
                 height: 1.5,
               ),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 48),
+            const SizedBox(height: 32),
+
+            // Options
             ...List.generate(quiz.options.length, (index) {
               final option = quiz.options[index];
               final isSelected = _selectedIndex == index;
 
               Color bgColor = AppColors.white;
-              Color borderColor = Colors.transparent;
+              Color borderColor = const Color(0xFFEADCC2);
 
               if (_isAnswered) {
                 final isThisCorrect = _correctIndex == index;
@@ -121,68 +204,76 @@ class _QuestionScreenState extends State<QuestionScreen> {
               }
 
               return Padding(
-                padding: const EdgeInsets.only(bottom: 16.0),
+                padding: const EdgeInsets.only(bottom: 12.0),
                 child: GestureDetector(
                   onTap: () => _onOptionSelected(index, quiz.id, option.id),
                   child: Container(
-                    padding: const EdgeInsets.all(20),
+                    padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
                       color: bgColor,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: borderColor == Colors.transparent
-                            ? AppColors.softBrown.withOpacity(0.2)
-                            : borderColor,
-                        width: 2,
-                      ),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: borderColor, width: 1.5),
                     ),
                     child: Row(
                       children: [
                         Container(
-                          width: 32,
-                          height: 32,
+                          width: 30, height: 30,
                           alignment: Alignment.center,
                           decoration: BoxDecoration(
                             color: AppColors.ivoryLight,
                             shape: BoxShape.circle,
-                            border: Border.all(color: AppColors.deepSaffron.withOpacity(0.3)),
+                            border: Border.all(color: AppColors.deepSaffron.withValues(alpha: 0.3)),
                           ),
                           child: Text(
-                            String.fromCharCode(65 + index), // A, B, C, D
+                            String.fromCharCode(65 + index),
                             style: const TextStyle(
                               color: AppColors.deepSaffron,
                               fontWeight: FontWeight.bold,
+                              fontSize: 13,
                             ),
                           ),
                         ),
-                        const SizedBox(width: 16),
+                        const SizedBox(width: 14),
                         Expanded(
                           child: Text(
                             option.text,
-                            style: const TextStyle(
-                              fontSize: 18,
-                              color: AppColors.sacredMaroon,
-                            ),
+                            style: const TextStyle(fontSize: 16, color: AppColors.sacredMaroon),
                           ),
                         ),
                         if (_isAnswered && _correctIndex == index)
-                          const Icon(Icons.check_circle, color: Colors.green),
+                          const Icon(Icons.check_circle, color: Colors.green, size: 22),
                         if (_isAnswered && isSelected && _correctIndex != index)
-                          const Icon(Icons.cancel, color: Colors.red),
+                          const Icon(Icons.cancel, color: Colors.red, size: 22),
                       ],
                     ),
                   ),
                 ),
               );
             }),
+
             const Spacer(),
-            if (!_isAnswered)
+
+            // Next / See Results button (only visible after answering)
+            if (_isAnswered)
+              ElevatedButton(
+                onPressed: _goToNextQuestion,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.deepSaffron,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+                child: Text(
+                  _currentQuestionIndex < _totalQuestions - 1
+                      ? (isTelugu ? 'తదుపరి ప్రశ్న →' : 'Next Question →')
+                      : (isTelugu ? 'ఫలితాలు చూడండి' : 'See Results'),
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              )
+            else
               Text(
                 isTelugu ? 'ఒక సమాధానాన్ని ఎంచుకోండి' : 'Select an answer',
-                style: const TextStyle(
-                  color: AppColors.softBrown,
-                  fontStyle: FontStyle.italic,
-                ),
+                style: const TextStyle(color: AppColors.softBrown, fontStyle: FontStyle.italic),
                 textAlign: TextAlign.center,
               ),
           ],

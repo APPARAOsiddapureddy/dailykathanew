@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 
 import '../../data/api_service.dart';
 import '../../data/mock_data.dart';
-import '../../theme/redesign_theme.dart';
 import 'day_complete_screen.dart';
 import 'question_screen.dart';
 
@@ -17,31 +15,25 @@ class StoryReaderScreen extends StatefulWidget {
 }
 
 class _StoryReaderScreenState extends State<StoryReaderScreen> {
-  late PageController _pageController;
   int _currentIndex = 0;
   bool _isLoading = true;
 
   String? _proxiedImageUrl(String? rawUrl) {
-    if (rawUrl == null || rawUrl.isEmpty) {
-      return null;
-    }
-    if (!rawUrl.startsWith('http')) {
-      return rawUrl;
-    }
+    if (rawUrl == null || rawUrl.isEmpty) return null;
+    if (!rawUrl.startsWith('http')) return rawUrl;
     return '${ApiService.baseUrl}/app/image-proxy?url=${Uri.encodeComponent(rawUrl)}';
   }
 
   @override
   void initState() {
     super.initState();
-    _pageController = PageController();
     _fetchDetails();
   }
 
   Future<void> _fetchDetails() async {
     try {
       final data = await apiService.fetchStoryDay(widget.journey.id, widget.episode.dayNumber);
-      
+
       final photosData = (data['photos'] as List?) ?? [];
       final quizzesData = (data['questions'] as List?) ?? [];
 
@@ -59,167 +51,173 @@ class _StoryReaderScreenState extends State<StoryReaderScreen> {
           options: optionsData.map((o) => QuizOption(id: o['id'], text: o['text'])).toList(),
         );
       }).toList();
-
     } catch (e) {
       debugPrint('Error fetching story day details: $e');
     } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  @override
-  void dispose() {
-    _pageController.dispose();
-    super.dispose();
-  }
-
-  void _nextCard() {
+  void _goNext() {
     if (_currentIndex < widget.episode.cards.length - 1) {
-      _pageController.nextPage(
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeInOut,
-      );
+      setState(() => _currentIndex++);
     } else {
       _finishStory();
+    }
+  }
+
+  void _goPrev() {
+    if (_currentIndex > 0) {
+      setState(() => _currentIndex--);
     }
   }
 
   void _finishStory() {
     if (widget.episode.quizzes.isNotEmpty) {
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => QuestionScreen(episode: widget.episode),
-        ),
+        MaterialPageRoute(builder: (_) => QuestionScreen(episode: widget.episode)),
       );
     } else {
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => DayCompleteScreen(episode: widget.episode),
-        ),
+        MaterialPageRoute(builder: (_) => DayCompleteScreen(episode: widget.episode)),
       );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final state = context.watch<AppState>();
-    final isTelugu = state.language == AppLanguage.telugu;
+    if (_isLoading) {
+      return const Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(child: CircularProgressIndicator(color: Color(0xFFF6C25A))),
+      );
+    }
+
+    if (widget.episode.cards.isEmpty) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          iconTheme: const IconThemeData(color: Colors.white),
+        ),
+        body: const Center(
+          child: Text('Story not available', style: TextStyle(color: Colors.white70, fontSize: 18)),
+        ),
+      );
+    }
+
+    final card = widget.episode.cards[_currentIndex];
+    final totalCards = widget.episode.cards.length;
 
     return Scaffold(
-      backgroundColor: AppColors.sacredMaroon,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        iconTheme: const IconThemeData(color: AppColors.white),
-        title: Column(
+      backgroundColor: Colors.black,
+      body: GestureDetector(
+        onTapUp: (details) {
+          final screenWidth = MediaQuery.of(context).size.width;
+          if (details.globalPosition.dx < screenWidth * 0.3) {
+            _goPrev();
+          } else {
+            _goNext();
+          }
+        },
+        child: Stack(
+          fit: StackFit.expand,
           children: [
-            Text(
-              widget.journey.title,
-              style: const TextStyle(color: AppColors.ivoryLight, fontSize: 14),
+            // ── Full-screen image ──
+            if (card.imageUrl != null)
+              Image.network(
+                card.imageUrl!,
+                fit: BoxFit.cover,
+                width: double.infinity,
+                height: double.infinity,
+                errorBuilder: (_, __, ___) => Image.asset(
+                  'assets/mahabharatam-cover.png',
+                  fit: BoxFit.cover, width: double.infinity, height: double.infinity,
+                ),
+              )
+            else
+              Image.asset(
+                'assets/mahabharatam-cover.png',
+                fit: BoxFit.cover, width: double.infinity, height: double.infinity,
+              ),
+
+            // ── Progress bars at the very top ──
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 8,
+              left: 8, right: 8,
+              child: Row(
+                children: List.generate(totalCards, (i) {
+                  return Expanded(
+                    child: Container(
+                      height: 3,
+                      margin: EdgeInsets.only(right: i < totalCards - 1 ? 3 : 0),
+                      decoration: BoxDecoration(
+                        color: i <= _currentIndex
+                            ? Colors.white
+                            : Colors.white.withValues(alpha: 0.3),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  );
+                }),
+              ),
             ),
-            Text(
-              isTelugu ? 'రోజు ${widget.episode.dayNumber}' : 'Day ${widget.episode.dayNumber}',
-              style: const TextStyle(color: AppColors.templeGold, fontSize: 16),
+
+            // ── Close button (top-left) ──
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 18,
+              left: 12,
+              child: GestureDetector(
+                onTap: () => Navigator.of(context).pop(),
+                child: Container(
+                  width: 32, height: 32,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.4),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.close, color: Colors.white, size: 18),
+                ),
+              ),
+            ),
+
+            // ── Bottom: counter + Next button ──
+            Positioned(
+              bottom: MediaQuery.of(context).padding.bottom + 16,
+              left: 16, right: 16,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    '${_currentIndex + 1}/$totalCards',
+                    style: const TextStyle(color: Colors.white70, fontSize: 14, fontWeight: FontWeight.w500),
+                  ),
+                  GestureDetector(
+                    onTap: _goNext,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE0701C),
+                        borderRadius: BorderRadius.circular(24),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.arrow_forward, color: Colors.white, size: 18),
+                          const SizedBox(width: 6),
+                          Text(
+                            _currentIndex < totalCards - 1 ? 'Next' : 'Finish',
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
-        centerTitle: true,
       ),
-      body: _isLoading 
-        ? const Center(child: CircularProgressIndicator(color: AppColors.templeGold))
-        : widget.episode.cards.isEmpty 
-          ? const Center(
-              child: Text(
-                'కథ అందుబాటులో లేదు\n(Story not available)', 
-                style: TextStyle(color: AppColors.ivoryLight, fontSize: 18),
-                textAlign: TextAlign.center,
-              )
-            )
-          : PageView.builder(
-              controller: _pageController,
-              onPageChanged: (index) => setState(() => _currentIndex = index),
-              itemCount: widget.episode.cards.length,
-              itemBuilder: (context, index) {
-                final card = widget.episode.cards[index];
-                return Padding(
-                  padding: const EdgeInsets.all(24.0),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Text(
-                        'ॐ',
-                        style: TextStyle(
-                          fontSize: 48,
-                          color: AppColors.templeGold,
-                          fontFamily: 'Noto Serif Telugu',
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        isTelugu ? 'కార్డ్ ${index + 1} / ${widget.episode.cards.length}' : 'Card ${index + 1} / ${widget.episode.cards.length}',
-                        style: const TextStyle(color: AppColors.softBrown),
-                      ),
-                      const SizedBox(height: 32),
-                      Text(
-                        widget.episode.title,
-                        style: const TextStyle(
-                          fontSize: 28,
-                          color: AppColors.templeGold,
-                          fontWeight: FontWeight.bold,
-                          fontFamily: 'Noto Serif Telugu',
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 24),
-                      if (card.imageUrl != null)
-                        Expanded(
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(16),
-                            child: Image.network(
-                              card.imageUrl!,
-                              fit: BoxFit.contain,
-                              errorBuilder: (_, __, ___) => const Center(
-                                child: Text(
-                                  'Image not available',
-                                  style: TextStyle(color: AppColors.ivoryLight),
-                                ),
-                              ),
-                            ),
-                          ),
-                        )
-                      else
-                        const Expanded(
-                          child: Center(
-                            child: Text(
-                              'Image not available',
-                              style: TextStyle(color: AppColors.ivoryLight),
-                            ),
-                          ),
-                        ),
-                      const Spacer(),
-                      TextButton(
-                        onPressed: _nextCard,
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              isTelugu ? 'తదుపరి కార్డ్ కోసం స్వైప్ చేయండి' : 'Swipe for next card',
-                              style: const TextStyle(color: AppColors.softBrown),
-                            ),
-                            const SizedBox(width: 8),
-                            const Icon(Icons.arrow_forward, color: AppColors.softBrown, size: 16),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                    ],
-                  ),
-                );
-              },
-            ),
     );
   }
 }
