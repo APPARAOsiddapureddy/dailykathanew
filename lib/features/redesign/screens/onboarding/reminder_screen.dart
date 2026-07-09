@@ -1,14 +1,29 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../../../../core/services/notification_service.dart';
+import '../../data/mock_data.dart';
 import '../main/main_shell.dart';
 
 class ReminderScreen extends StatelessWidget {
   const ReminderScreen({super.key});
 
   void _finishOnboarding(BuildContext context) {
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const MainShell()),
-    );
+    Navigator.of(
+      context,
+    ).pushReplacement(MaterialPageRoute(builder: (_) => const MainShell()));
+  }
+
+  Future<void> _allowReminders(BuildContext context) async {
+    final state = context.read<AppState>();
+    final granted = await NotificationService.instance.requestPermission();
+    await state.setNotificationsEnabled(granted);
+    if (context.mounted) _finishOnboarding(context);
+  }
+
+  Future<void> _skipReminders(BuildContext context) async {
+    await context.read<AppState>().setNotificationsEnabled(false);
+    if (context.mounted) _finishOnboarding(context);
   }
 
   @override
@@ -86,15 +101,14 @@ class ReminderScreen extends StatelessWidget {
 
               // ── Time pill ──
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 10,
+                ),
                 decoration: BoxDecoration(
                   color: const Color(0xFFFBEAD2),
                   borderRadius: BorderRadius.circular(99),
-                  border: Border.all(
-                    color: const Color(0xFFEAD3A8),
-                    width: 1,
-                  ),
+                  border: Border.all(color: const Color(0xFFEAD3A8), width: 1),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -131,10 +145,7 @@ class ReminderScreen extends StatelessWidget {
                     gradient: const LinearGradient(
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
-                      colors: [
-                        Color(0xFFE67C22),
-                        Color(0xFFCE5D0E),
-                      ],
+                      colors: [Color(0xFFE67C22), Color(0xFFCE5D0E)],
                     ),
                     boxShadow: [
                       BoxShadow(
@@ -145,7 +156,7 @@ class ReminderScreen extends StatelessWidget {
                     ],
                   ),
                   child: ElevatedButton(
-                    onPressed: () => _finishOnboarding(context),
+                    onPressed: () => _allowReminders(context),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.transparent,
                       shadowColor: Colors.transparent,
@@ -171,7 +182,7 @@ class ReminderScreen extends StatelessWidget {
 
               // ── Not now button ──
               TextButton(
-                onPressed: () => _finishOnboarding(context),
+                onPressed: () => _skipReminders(context),
                 style: TextButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 14),
                 ),

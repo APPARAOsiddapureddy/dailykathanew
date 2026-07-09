@@ -29,7 +29,7 @@ class ProfileScreen extends StatelessWidget {
                 ),
                 alignment: Alignment.center,
                 child: Text(
-                  isTelugu ? 'ప్రి' : 'Pri',
+                  _initials(state.userName),
                   style: const TextStyle(
                     fontSize: 32,
                     color: AppColors.deepSaffron,
@@ -52,10 +52,8 @@ class ProfileScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      isTelugu ? 'తెలుగు · జనవరి 2025 నుండి' : 'English · Since Jan 2025',
-                      style: const TextStyle(
-                        color: AppColors.softBrown,
-                      ),
+                      _joinedLabel(state.joinedAt, isTelugu),
+                      style: const TextStyle(color: AppColors.softBrown),
                     ),
                   ],
                 ),
@@ -66,11 +64,28 @@ class ProfileScreen extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _StatWidget(value: '${state.completedDays}', label: isTelugu ? 'రోజులు' : 'Days'),
-              Container(width: 1, height: 40, color: AppColors.softBrown.withValues(alpha: 0.2)),
-              _StatWidget(value: '${state.streak}', label: isTelugu ? 'వరుస' : 'Streak'),
-              Container(width: 1, height: 40, color: AppColors.softBrown.withValues(alpha: 0.2)),
-              _StatWidget(value: '${state.storiesStarted}', label: isTelugu ? 'ఇతిహాసం' : 'Epic'),
+              _StatWidget(
+                value: '${state.completedDays}',
+                label: isTelugu ? 'రోజులు' : 'Days',
+              ),
+              Container(
+                width: 1,
+                height: 40,
+                color: AppColors.softBrown.withValues(alpha: 0.2),
+              ),
+              _StatWidget(
+                value: '${state.streak}',
+                label: isTelugu ? 'వరుస' : 'Streak',
+              ),
+              Container(
+                width: 1,
+                height: 40,
+                color: AppColors.softBrown.withValues(alpha: 0.2),
+              ),
+              _StatWidget(
+                value: '${state.storiesStarted}',
+                label: isTelugu ? 'ఇతిహాసం' : 'Epic',
+              ),
             ],
           ),
           const SizedBox(height: 48),
@@ -88,7 +103,9 @@ class ProfileScreen extends StatelessWidget {
             decoration: BoxDecoration(
               color: AppColors.white,
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppColors.sacredMaroon.withValues(alpha: 0.1)),
+              border: Border.all(
+                color: AppColors.sacredMaroon.withValues(alpha: 0.1),
+              ),
             ),
             child: Row(
               children: [
@@ -97,13 +114,22 @@ class ProfileScreen extends StatelessWidget {
                   child: state.activeJourney.coverAsset.startsWith('http')
                       ? Image.network(
                           state.activeJourney.coverAsset,
-                          width: 60, height: 60, fit: BoxFit.cover,
+                          width: 60,
+                          height: 60,
+                          fit: BoxFit.cover,
                           errorBuilder: (_, __, ___) => Image.asset(
                             'assets/mahabharatam-cover.png',
-                            width: 60, height: 60, fit: BoxFit.cover,
+                            width: 60,
+                            height: 60,
+                            fit: BoxFit.cover,
                           ),
                         )
-                      : Image.asset(state.activeJourney.coverAsset, width: 60, height: 60, fit: BoxFit.cover),
+                      : Image.asset(
+                          state.activeJourney.coverAsset,
+                          width: 60,
+                          height: 60,
+                          fit: BoxFit.cover,
+                        ),
                 ),
                 const SizedBox(width: 16),
                 Expanded(
@@ -136,12 +162,16 @@ class ProfileScreen extends StatelessWidget {
           _ProfileMenuTile(
             icon: Icons.workspace_premium,
             title: isTelugu ? 'సబ్‌స్క్రిప్షన్' : 'Subscription',
-            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SubscriptionScreen())),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const SubscriptionScreen()),
+            ),
           ),
           _ProfileMenuTile(
             icon: Icons.settings_outlined,
             title: isTelugu ? 'సెట్టింగ్‌లు' : 'Settings',
-            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsScreen())),
+            onTap: () => Navigator.of(
+              context,
+            ).push(MaterialPageRoute(builder: (_) => const SettingsScreen())),
           ),
         ],
       ),
@@ -167,12 +197,7 @@ class _StatWidget extends StatelessWidget {
             color: AppColors.sacredMaroon,
           ),
         ),
-        Text(
-          label,
-          style: const TextStyle(
-            color: AppColors.softBrown,
-          ),
-        ),
+        Text(label, style: const TextStyle(color: AppColors.softBrown)),
       ],
     );
   }
@@ -192,13 +217,61 @@ class _ProfileMenuTile extends StatelessWidget {
       leading: Icon(icon, color: AppColors.deepSaffron),
       title: Text(
         title,
-        style: const TextStyle(
-          fontSize: 18,
-          color: AppColors.sacredMaroon,
-        ),
+        style: const TextStyle(fontSize: 18, color: AppColors.sacredMaroon),
       ),
-      trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: AppColors.softBrown),
+      trailing: const Icon(
+        Icons.arrow_forward_ios,
+        size: 16,
+        color: AppColors.softBrown,
+      ),
       contentPadding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
     );
   }
+}
+
+String _initials(String name) {
+  final trimmed = name.trim();
+  if (trimmed.isEmpty) return '?';
+  return trimmed.length >= 2
+      ? trimmed.substring(0, 2)
+      : trimmed.substring(0, 1);
+}
+
+const _enMonths = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
+const _teMonths = [
+  'జన',
+  'ఫిబ్ర',
+  'మార్చి',
+  'ఏప్రి',
+  'మే',
+  'జూన్',
+  'జూలై',
+  'ఆగ',
+  'సెప్టెం',
+  'అక్టో',
+  'నవం',
+  'డిసెం',
+];
+
+String _joinedLabel(DateTime? joinedAt, bool isTelugu) {
+  if (joinedAt == null) {
+    return isTelugu ? 'తెలుగు' : 'English';
+  }
+  final month = joinedAt.month - 1;
+  return isTelugu
+      ? 'తెలుగు · ${_teMonths[month]} ${joinedAt.year} నుండి'
+      : 'English · Since ${_enMonths[month]} ${joinedAt.year}';
 }

@@ -44,9 +44,7 @@ final ThemeData redesignTheme = ThemeData(
         fontWeight: FontWeight.bold,
         fontFamily: 'Noto Sans Telugu',
       ),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
     ),
   ),
@@ -59,9 +57,7 @@ final ThemeData redesignTheme = ThemeData(
         fontWeight: FontWeight.bold,
         fontFamily: 'Noto Sans Telugu',
       ),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
     ),
   ),

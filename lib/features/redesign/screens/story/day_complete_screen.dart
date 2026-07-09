@@ -31,7 +31,9 @@ class DayCompleteScreen extends StatelessWidget {
               ),
               const SizedBox(height: 32),
               Text(
-                isTelugu ? 'రోజు ${episode.dayNumber} పూర్తయింది!' : 'Day ${episode.dayNumber} Complete!',
+                isTelugu
+                    ? 'రోజు ${episode.dayNumber} పూర్తయింది!'
+                    : 'Day ${episode.dayNumber} Complete!',
                 style: const TextStyle(
                   fontSize: 32,
                   fontWeight: FontWeight.bold,
@@ -59,14 +61,20 @@ class DayCompleteScreen extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: AppColors.ivoryLight,
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AppColors.templeGold.withValues(alpha: 0.3)),
+                  border: Border.all(
+                    color: AppColors.templeGold.withValues(alpha: 0.3),
+                  ),
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
                     Column(
                       children: [
-                        const Icon(Icons.local_fire_department, color: AppColors.deepSaffron, size: 32),
+                        const Icon(
+                          Icons.local_fire_department,
+                          color: AppColors.deepSaffron,
+                          size: 32,
+                        ),
                         const SizedBox(height: 8),
                         Text(
                           '${state.streak}',
@@ -78,14 +86,25 @@ class DayCompleteScreen extends StatelessWidget {
                         ),
                         Text(
                           isTelugu ? 'రోజుల వరుస' : 'Day Streak',
-                          style: const TextStyle(fontSize: 12, color: AppColors.softBrown),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.softBrown,
+                          ),
                         ),
                       ],
                     ),
-                    Container(width: 1, height: 50, color: AppColors.softBrown.withValues(alpha: 0.2)),
+                    Container(
+                      width: 1,
+                      height: 50,
+                      color: AppColors.softBrown.withValues(alpha: 0.2),
+                    ),
                     Column(
                       children: [
-                        const Icon(Icons.star, color: AppColors.deepSaffron, size: 32),
+                        const Icon(
+                          Icons.star,
+                          color: AppColors.deepSaffron,
+                          size: 32,
+                        ),
                         const SizedBox(height: 8),
                         Text(
                           '${state.points}',
@@ -97,7 +116,10 @@ class DayCompleteScreen extends StatelessWidget {
                         ),
                         Text(
                           isTelugu ? 'పాయింట్లు' : 'Points',
-                          style: const TextStyle(fontSize: 12, color: AppColors.softBrown),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.softBrown,
+                          ),
                         ),
                       ],
                     ),
@@ -112,7 +134,9 @@ class DayCompleteScreen extends StatelessWidget {
                     (route) => false,
                   );
                 },
-                child: Text(isTelugu ? 'హోమ్‌కి తిరిగి వెళ్ళు' : 'Return to Home'),
+                child: Text(
+                  isTelugu ? 'హోమ్‌కి తిరిగి వెళ్ళు' : 'Return to Home',
+                ),
               ),
               const SizedBox(height: 16),
             ],

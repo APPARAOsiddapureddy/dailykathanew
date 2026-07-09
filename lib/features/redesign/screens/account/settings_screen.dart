@@ -6,6 +6,7 @@ import '../../../../app/config.dart';
 import '../../data/mock_data.dart';
 import '../onboarding/language_screen.dart';
 import '../auth/auth_screens.dart';
+import 'edit_profile_screen.dart';
 import 'subscription_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
@@ -22,6 +23,25 @@ class SettingsScreen extends StatelessWidget {
         MaterialPageRoute(builder: (_) => const PhoneLoginScreen()),
         (route) => false,
       );
+    }
+  }
+
+  static String _formatReminderTime(TimeOfDay time, bool isTelugu) {
+    final hour12 = time.hourOfPeriod == 0 ? 12 : time.hourOfPeriod;
+    final minute = time.minute.toString().padLeft(2, '0');
+    final isAm = time.period == DayPeriod.am;
+    return isTelugu
+        ? '${isAm ? 'ఉదయం' : 'సాయంత్రం'} $hour12:$minute'
+        : '$hour12:$minute ${isAm ? 'AM' : 'PM'}';
+  }
+
+  Future<void> _pickReminderTime(BuildContext context, AppState state) async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: state.reminderTime,
+    );
+    if (picked != null && context.mounted) {
+      await context.read<AppState>().setReminderTime(picked);
     }
   }
 
@@ -117,44 +137,35 @@ class SettingsScreen extends StatelessWidget {
                   showBottomBorder: true,
                   onTap: () {
                     Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const LanguageScreen()),
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            const LanguageScreen(isOnboarding: false),
+                      ),
                     );
                   },
                 ),
                 _SettingsTile(
                   icon: Icons.notifications_none,
                   title: isTelugu ? 'నోటిఫికేషన్‌లు' : 'Notifications',
-                  trailingWidget: Container(
-                    width: 44,
-                    height: 26,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFE0701C),
-                      borderRadius: BorderRadius.circular(99),
-                    ),
-                    child: Stack(
-                      children: [
-                        Positioned(
-                          right: 3,
-                          top: 3,
-                          child: Container(
-                            width: 20,
-                            height: 20,
-                            decoration: const BoxDecoration(
-                              color: Color(0xFFFFF6E7),
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+                  trailingWidget: Switch(
+                    value: state.notificationsEnabled,
+                    activeThumbColor: const Color(0xFFFFF6E7),
+                    activeTrackColor: const Color(0xFFE0701C),
+                    onChanged: (enabled) => context
+                        .read<AppState>()
+                        .setNotificationsEnabled(enabled),
                   ),
                   showBottomBorder: true,
                 ),
                 _SettingsTile(
                   icon: Icons.access_time,
                   title: isTelugu ? 'గుర్తు సమయం' : 'Reminder Time',
-                  trailingText: isTelugu ? 'ఉదయం 7:00' : '7:00 AM',
+                  trailingText: _formatReminderTime(
+                    state.reminderTime,
+                    isTelugu,
+                  ),
                   showBottomBorder: false,
+                  onTap: () => _pickReminderTime(context, state),
                 ),
               ],
             ),
@@ -205,11 +216,13 @@ class SettingsScreen extends StatelessWidget {
                   icon: Icons.person_outline,
                   title: isTelugu ? 'ప్రొఫైల్ సవరించు' : 'Edit Profile',
                   showBottomBorder: true,
-                ),
-                _SettingsTile(
-                  icon: Icons.download_outlined,
-                  title: isTelugu ? 'డౌన్‌లోడ్‌లు' : 'Downloads',
-                  showBottomBorder: false,
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const EditProfileScreen(),
+                      ),
+                    );
+                  },
                 ),
                 _SettingsTile(
                   icon: Icons.privacy_tip_outlined,

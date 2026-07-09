@@ -30,35 +30,39 @@ class _MainShellState extends State<MainShell> {
         ],
       ),
       bottomNavigationBar: Container(
-        height: 62,
         decoration: const BoxDecoration(
           color: Color(0xFFFFFDF8),
-          border: Border(
-            top: BorderSide(color: Color(0xFFEADCC2), width: 1),
-          ),
+          border: Border(top: BorderSide(color: Color(0xFFEADCC2), width: 1)),
         ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            _NavItem(
-              icon: Icons.home_outlined,
-              label: 'హోమ్',
-              isActive: _currentIndex == 0,
-              onTap: () => setState(() => _currentIndex = 0),
+        // SafeArea keeps the tab bar above the phone's gesture/nav area.
+        child: SafeArea(
+          top: false,
+          child: SizedBox(
+            height: 62,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _NavItem(
+                  icon: Icons.home_outlined,
+                  label: 'హోమ్',
+                  isActive: _currentIndex == 0,
+                  onTap: () => setState(() => _currentIndex = 0),
+                ),
+                _NavItem(
+                  icon: Icons.explore_outlined,
+                  label: 'అన్వేషణ',
+                  isActive: _currentIndex == 1,
+                  onTap: () => setState(() => _currentIndex = 1),
+                ),
+                _NavItem(
+                  icon: Icons.person_outline,
+                  label: 'ప్రొఫైల్',
+                  isActive: _currentIndex == 2,
+                  onTap: () => setState(() => _currentIndex = 2),
+                ),
+              ],
             ),
-            _NavItem(
-              icon: Icons.explore_outlined,
-              label: 'అన్వేషణ',
-              isActive: _currentIndex == 1,
-              onTap: () => setState(() => _currentIndex = 1),
-            ),
-            _NavItem(
-              icon: Icons.person_outline,
-              label: 'ప్రొఫైల్',
-              isActive: _currentIndex == 2,
-              onTap: () => setState(() => _currentIndex = 2),
-            ),
-          ],
+          ),
         ),
       ),
     );

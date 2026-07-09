@@ -128,10 +128,20 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
                 ),
                 child: _isChecking
                     ? const SizedBox(
-                        height: 20, width: 20,
-                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
                       )
-                    : const Text('Continue', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    : const Text(
+                        'Continue',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
               ),
             ],
           ),
@@ -236,10 +246,20 @@ class _NameScreenState extends State<NameScreen> {
                 ),
                 child: _isSubmitting
                     ? const SizedBox(
-                        height: 20, width: 20,
-                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
                       )
-                    : const Text('Start Journey', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    : const Text(
+                        'Start Journey',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
               ),
             ],
           ),

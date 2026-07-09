@@ -36,7 +36,11 @@ class QuizResultsScreen extends StatelessWidget {
               const SizedBox(height: 16),
 
               // Trophy icon
-              const Icon(Icons.emoji_events, color: AppColors.templeGold, size: 64),
+              const Icon(
+                Icons.emoji_events,
+                color: AppColors.templeGold,
+                size: 64,
+              ),
               const SizedBox(height: 16),
 
               // Title
@@ -53,7 +57,10 @@ class QuizResultsScreen extends StatelessWidget {
               const SizedBox(height: 4),
               Text(
                 '${isTelugu ? "రోజు" : "Day"} ${episode.dayNumber} · ${episode.title}',
-                style: const TextStyle(fontSize: 14, color: AppColors.softBrown),
+                style: const TextStyle(
+                  fontSize: 14,
+                  color: AppColors.softBrown,
+                ),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 24),
@@ -84,7 +91,10 @@ class QuizResultsScreen extends StatelessWidget {
 
               // Points earned
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 14,
+                ),
                 decoration: BoxDecoration(
                   color: AppColors.white,
                   borderRadius: BorderRadius.circular(14),
@@ -92,7 +102,11 @@ class QuizResultsScreen extends StatelessWidget {
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.star, color: AppColors.templeGold, size: 28),
+                    const Icon(
+                      Icons.star,
+                      color: AppColors.templeGold,
+                      size: 28,
+                    ),
                     const SizedBox(width: 12),
                     Text(
                       '+$pointsEarned',
@@ -105,7 +119,10 @@ class QuizResultsScreen extends StatelessWidget {
                     const SizedBox(width: 8),
                     Text(
                       isTelugu ? 'పాయింట్లు సంపాదించారు' : 'Points earned',
-                      style: const TextStyle(fontSize: 14, color: AppColors.softBrown),
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: AppColors.softBrown,
+                      ),
                     ),
                   ],
                 ),
@@ -146,7 +163,8 @@ class QuizResultsScreen extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Container(
-                            width: 28, height: 28,
+                            width: 28,
+                            height: 28,
                             alignment: Alignment.center,
                             decoration: BoxDecoration(
                               color: aq.isCorrect ? Colors.green : Colors.red,
@@ -267,11 +285,16 @@ class QuizResultsScreen extends StatelessWidget {
                 },
                 style: ElevatedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
                 ),
                 child: Text(
                   isTelugu ? 'హోమ్‌కి తిరిగి వెళ్ళు' : 'Return to Home',
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
               const SizedBox(height: 16),
@@ -322,7 +345,10 @@ class _ScoreCard extends StatelessWidget {
               ),
               Text(
                 label,
-                style: const TextStyle(fontSize: 13, color: AppColors.softBrown),
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: AppColors.softBrown,
+                ),
               ),
             ],
           ),

@@ -194,16 +194,6 @@ class _SplashScreenState extends State<SplashScreen>
                       },
                     ),
                   ),
-                  const SizedBox(height: 14),
-                  Text(
-                    'from AppsForBharat',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w400,
-                      color: const Color(0xFFFFF0DC).withValues(alpha: 0.6),
-                      letterSpacing: 0.48,
-                    ),
-                  ),
                 ],
               ),
             ),

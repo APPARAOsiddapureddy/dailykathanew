@@ -1,0 +1,7 @@
+THIS PROJECT HAS MOVED — DO NOT EDIT FILES HERE
+
+The active copy is now at:  C:\dev\dailykathanew
+
+Everything was copied there (git repo, uncommitted changes, keystore, all source).
+This OneDrive copy is now stale. After confirming the new location works,
+delete this whole folder.

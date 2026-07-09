@@ -81,11 +81,17 @@ class _ExploreScreenState extends State<ExploreScreen> {
               setState(() => _searchQuery = value.trim());
             },
             decoration: InputDecoration(
-              hintText: isTelugu ? 'కథలు, పాత్రలు వెతకండి' : 'Search stories, characters',
+              hintText: isTelugu
+                  ? 'కథలు, పాత్రలు వెతకండి'
+                  : 'Search stories, characters',
               prefixIcon: const Icon(Icons.search, color: AppColors.softBrown),
               suffixIcon: _searchQuery.isNotEmpty
                   ? IconButton(
-                      icon: const Icon(Icons.close, color: AppColors.softBrown, size: 20),
+                      icon: const Icon(
+                        Icons.close,
+                        color: AppColors.softBrown,
+                        size: 20,
+                      ),
                       onPressed: () {
                         _searchController.clear();
                         setState(() => _searchQuery = '');
@@ -118,19 +124,22 @@ class _ExploreScreenState extends State<ExploreScreen> {
                 _FilterChip(
                   label: isTelugu ? 'ప్రారంభించినవి' : 'Started',
                   isActive: _activeFilter == StoryFilter.started,
-                  onTap: () => setState(() => _activeFilter = StoryFilter.started),
+                  onTap: () =>
+                      setState(() => _activeFilter = StoryFilter.started),
                 ),
                 const SizedBox(width: 8),
                 _FilterChip(
                   label: isTelugu ? 'పూర్తయినవి' : 'Completed',
                   isActive: _activeFilter == StoryFilter.completed,
-                  onTap: () => setState(() => _activeFilter = StoryFilter.completed),
+                  onTap: () =>
+                      setState(() => _activeFilter = StoryFilter.completed),
                 ),
                 const SizedBox(width: 8),
                 _FilterChip(
                   label: isTelugu ? 'ప్రారంభించలేదు' : 'Not Started',
                   isActive: _activeFilter == StoryFilter.notStarted,
-                  onTap: () => setState(() => _activeFilter = StoryFilter.notStarted),
+                  onTap: () =>
+                      setState(() => _activeFilter = StoryFilter.notStarted),
                 ),
               ],
             ),
@@ -156,7 +165,11 @@ class _ExploreScreenState extends State<ExploreScreen> {
               child: Center(
                 child: Column(
                   children: [
-                    const Icon(Icons.search_off, size: 48, color: AppColors.softBrown),
+                    const Icon(
+                      Icons.search_off,
+                      size: 48,
+                      color: AppColors.softBrown,
+                    ),
                     const SizedBox(height: 12),
                     Text(
                       isTelugu ? 'ఫలితాలు కనుగొనబడలేదు' : 'No stories found',
@@ -254,10 +267,7 @@ class _ComingSoonChip extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: AppColors.softBrown.withValues(alpha: 0.3)),
       ),
-      child: Text(
-        label,
-        style: const TextStyle(color: AppColors.softBrown),
-      ),
+      child: Text(label, style: const TextStyle(color: AppColors.softBrown)),
     );
   }
 }

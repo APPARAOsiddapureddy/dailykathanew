@@ -119,7 +119,9 @@ class _QuestionScreenState extends State<QuestionScreen> {
       });
     } else {
       // All questions done — mark day as complete and show results
-      final correctCount = _answeredQuestions.where((answer) => answer.isCorrect).length;
+      final correctCount = _answeredQuestions
+          .where((answer) => answer.isCorrect)
+          .length;
       final pointsEarned = correctCount * 10;
       await context.read<AppState>().submitQuizAttempt(
         widget.episode.id,
