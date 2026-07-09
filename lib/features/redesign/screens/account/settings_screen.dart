@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../../../../app/config.dart';
 import '../../data/mock_data.dart';
-import '../../theme/redesign_theme.dart';
 import '../onboarding/language_screen.dart';
 import '../auth/auth_screens.dart';
 import 'subscription_screen.dart';
@@ -11,10 +11,56 @@ import 'subscription_screen.dart';
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
-  void _logout(BuildContext context) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('user_phone');
-    await prefs.remove('user_name');
+  static final Uri _privacyPolicyUri = Uri.parse(
+    '${AppConfig.apiBaseUrl}/privacy-policy',
+  );
+
+  Future<void> _logout(BuildContext context) async {
+    await context.read<AppState>().logout();
+    if (context.mounted) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const PhoneLoginScreen()),
+        (route) => false,
+      );
+    }
+  }
+
+  Future<void> _openPrivacyPolicy(BuildContext context) async {
+    final opened = await launchUrl(
+      _privacyPolicyUri,
+      mode: LaunchMode.externalApplication,
+    );
+    if (!opened && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to open privacy policy')),
+      );
+    }
+  }
+
+  Future<void> _deleteAccount(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete account?'),
+        content: const Text(
+          'This will permanently delete your account and sign you out.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    await context.read<AppState>().deleteAccount();
     if (context.mounted) {
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const PhoneLoginScreen()),
@@ -34,7 +80,11 @@ class SettingsScreen extends StatelessWidget {
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, color: Color(0xFF6B1F22), size: 22),
+          icon: const Icon(
+            Icons.arrow_back_ios_new,
+            color: Color(0xFF6B1F22),
+            size: 22,
+          ),
           onPressed: () => Navigator.of(context).pop(),
         ),
         title: Text(
@@ -66,7 +116,9 @@ class SettingsScreen extends StatelessWidget {
                   trailingText: isTelugu ? 'తెలుగు' : 'English',
                   showBottomBorder: true,
                   onTap: () {
-                    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LanguageScreen()));
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const LanguageScreen()),
+                    );
                   },
                 ),
                 _SettingsTile(
@@ -107,7 +159,7 @@ class SettingsScreen extends StatelessWidget {
               ],
             ),
           ),
-          
+
           const SizedBox(height: 20),
           _SectionHeader(title: isTelugu ? 'ఖాతా' : 'Account'),
           Container(
@@ -122,7 +174,10 @@ class SettingsScreen extends StatelessWidget {
                   icon: Icons.workspace_premium_outlined,
                   title: isTelugu ? 'సబ్‌స్క్రిప్షన్' : 'Subscription',
                   trailingWidget: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
                     decoration: BoxDecoration(
                       color: const Color(0xFFFBEAD2),
                       borderRadius: BorderRadius.circular(99),
@@ -139,7 +194,11 @@ class SettingsScreen extends StatelessWidget {
                   ),
                   showBottomBorder: true,
                   onTap: () {
-                    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SubscriptionScreen()));
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const SubscriptionScreen(),
+                      ),
+                    );
                   },
                 ),
                 _SettingsTile(
@@ -151,6 +210,20 @@ class SettingsScreen extends StatelessWidget {
                   icon: Icons.download_outlined,
                   title: isTelugu ? 'డౌన్‌లోడ్‌లు' : 'Downloads',
                   showBottomBorder: false,
+                ),
+                _SettingsTile(
+                  icon: Icons.privacy_tip_outlined,
+                  title: isTelugu ? 'గోప్యతా విధానం' : 'Privacy Policy',
+                  showBottomBorder: true,
+                  onTap: () => _openPrivacyPolicy(context),
+                ),
+                _SettingsTile(
+                  icon: Icons.delete_forever_outlined,
+                  title: isTelugu ? 'ఖాతా తొలగించు' : 'Delete Account',
+                  showBottomBorder: false,
+                  iconColor: const Color(0xFFB3261E),
+                  titleColor: const Color(0xFFB3261E),
+                  onTap: () => _deleteAccount(context),
                 ),
               ],
             ),
@@ -212,6 +285,8 @@ class _SettingsTile extends StatelessWidget {
   final Widget? trailingWidget;
   final bool showBottomBorder;
   final VoidCallback? onTap;
+  final Color? iconColor;
+  final Color? titleColor;
 
   const _SettingsTile({
     required this.icon,
@@ -220,6 +295,8 @@ class _SettingsTile extends StatelessWidget {
     this.trailingWidget,
     this.showBottomBorder = true,
     this.onTap,
+    this.iconColor,
+    this.titleColor,
   });
 
   @override
@@ -235,13 +312,13 @@ class _SettingsTile extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Icon(icon, color: const Color(0xFFC05A12), size: 19),
+            Icon(icon, color: iconColor ?? const Color(0xFFC05A12), size: 19),
             const SizedBox(width: 13),
             Expanded(
               child: Text(
                 title,
-                style: const TextStyle(
-                  color: Color(0xFF3F2E1E),
+                style: TextStyle(
+                  color: titleColor ?? const Color(0xFF3F2E1E),
                   fontSize: 15,
                   fontWeight: FontWeight.w500,
                   fontFamily: 'Noto Sans Telugu',
@@ -265,7 +342,11 @@ class _SettingsTile extends StatelessWidget {
               const SizedBox(width: 8),
             ],
             if (trailingWidget == null)
-              const Icon(Icons.arrow_forward_ios, color: Color(0xFFC7B394), size: 16),
+              const Icon(
+                Icons.arrow_forward_ios,
+                color: Color(0xFFC7B394),
+                size: 16,
+              ),
           ],
         ),
       ),

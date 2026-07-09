@@ -139,7 +139,7 @@ class _PlanCard extends StatelessWidget {
         color: isSelected ? AppColors.ivoryLight : AppColors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isSelected ? AppColors.deepSaffron : AppColors.softBrown.withOpacity(0.2),
+          color: isSelected ? AppColors.deepSaffron : AppColors.softBrown.withValues(alpha: 0.2),
           width: 2,
         ),
       ),

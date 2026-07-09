@@ -8,6 +8,7 @@ import 'quiz_results_screen.dart';
 
 /// Stores the result of a single answered question.
 class AnsweredQuestion {
+  final String questionId;
   final String questionText;
   final String userOptionId;
   final String userOptionText;
@@ -16,6 +17,7 @@ class AnsweredQuestion {
   final bool isCorrect;
 
   AnsweredQuestion({
+    required this.questionId,
     required this.questionText,
     required this.userOptionId,
     required this.userOptionText,
@@ -58,20 +60,25 @@ class _QuestionScreenState extends State<QuestionScreen> {
 
       int correctIdx = index;
       if (!isCorrect && correctOptionId.isNotEmpty) {
-        correctIdx = _currentQuiz.options.indexWhere((o) => o.id == correctOptionId);
+        correctIdx = _currentQuiz.options.indexWhere(
+          (o) => o.id == correctOptionId,
+        );
       }
 
       // Record this answer
-      _answeredQuestions.add(AnsweredQuestion(
-        questionText: _currentQuiz.question,
-        userOptionId: optionId,
-        userOptionText: _currentQuiz.options[index].text,
-        correctOptionId: correctOptionId,
-        correctOptionText: correctOptionText.isNotEmpty
-            ? correctOptionText
-            : (correctIdx >= 0 ? _currentQuiz.options[correctIdx].text : ''),
-        isCorrect: isCorrect,
-      ));
+      _answeredQuestions.add(
+        AnsweredQuestion(
+          questionId: _currentQuiz.id,
+          questionText: _currentQuiz.question,
+          userOptionId: optionId,
+          userOptionText: _currentQuiz.options[index].text,
+          correctOptionId: correctOptionId,
+          correctOptionText: correctOptionText.isNotEmpty
+              ? correctOptionText
+              : (correctIdx >= 0 ? _currentQuiz.options[correctIdx].text : ''),
+          isCorrect: isCorrect,
+        ),
+      );
 
       setState(() {
         _isAnswered = true;
@@ -83,14 +90,17 @@ class _QuestionScreenState extends State<QuestionScreen> {
       }
     } catch (e) {
       // On error, still record and move on
-      _answeredQuestions.add(AnsweredQuestion(
-        questionText: _currentQuiz.question,
-        userOptionId: optionId,
-        userOptionText: _currentQuiz.options[index].text,
-        correctOptionId: '',
-        correctOptionText: '',
-        isCorrect: false,
-      ));
+      _answeredQuestions.add(
+        AnsweredQuestion(
+          questionId: _currentQuiz.id,
+          questionText: _currentQuiz.question,
+          userOptionId: optionId,
+          userOptionText: _currentQuiz.options[index].text,
+          correctOptionId: '',
+          correctOptionText: '',
+          isCorrect: false,
+        ),
+      );
       setState(() {
         _isAnswered = true;
         _correctIndex = null;
@@ -109,6 +119,21 @@ class _QuestionScreenState extends State<QuestionScreen> {
       });
     } else {
       // All questions done — mark day as complete and show results
+      final correctCount = _answeredQuestions.where((answer) => answer.isCorrect).length;
+      final pointsEarned = correctCount * 10;
+      await context.read<AppState>().submitQuizAttempt(
+        widget.episode.id,
+        _answeredQuestions
+            .map(
+              (answer) => {
+                'questionId': answer.questionId,
+                'selectedOptionId': answer.userOptionId,
+              },
+            )
+            .toList(),
+        pointsEarned: pointsEarned,
+        correctCount: correctCount,
+      );
       await context.read<AppState>().completeStoryDay(widget.episode.id);
 
       if (mounted) {
@@ -148,7 +173,9 @@ class _QuestionScreenState extends State<QuestionScreen> {
               children: List.generate(_totalQuestions, (i) {
                 Color barColor;
                 if (i < _answeredQuestions.length) {
-                  barColor = _answeredQuestions[i].isCorrect ? Colors.green : Colors.red;
+                  barColor = _answeredQuestions[i].isCorrect
+                      ? Colors.green
+                      : Colors.red;
                 } else if (i == _currentQuestionIndex) {
                   barColor = AppColors.deepSaffron;
                 } else {
@@ -157,7 +184,9 @@ class _QuestionScreenState extends State<QuestionScreen> {
                 return Expanded(
                   child: Container(
                     height: 4,
-                    margin: EdgeInsets.only(right: i < _totalQuestions - 1 ? 4 : 0),
+                    margin: EdgeInsets.only(
+                      right: i < _totalQuestions - 1 ? 4 : 0,
+                    ),
                     decoration: BoxDecoration(
                       color: barColor,
                       borderRadius: BorderRadius.circular(2),
@@ -217,12 +246,17 @@ class _QuestionScreenState extends State<QuestionScreen> {
                     child: Row(
                       children: [
                         Container(
-                          width: 30, height: 30,
+                          width: 30,
+                          height: 30,
                           alignment: Alignment.center,
                           decoration: BoxDecoration(
                             color: AppColors.ivoryLight,
                             shape: BoxShape.circle,
-                            border: Border.all(color: AppColors.deepSaffron.withValues(alpha: 0.3)),
+                            border: Border.all(
+                              color: AppColors.deepSaffron.withValues(
+                                alpha: 0.3,
+                              ),
+                            ),
                           ),
                           child: Text(
                             String.fromCharCode(65 + index),
@@ -237,11 +271,18 @@ class _QuestionScreenState extends State<QuestionScreen> {
                         Expanded(
                           child: Text(
                             option.text,
-                            style: const TextStyle(fontSize: 16, color: AppColors.sacredMaroon),
+                            style: const TextStyle(
+                              fontSize: 16,
+                              color: AppColors.sacredMaroon,
+                            ),
                           ),
                         ),
                         if (_isAnswered && _correctIndex == index)
-                          const Icon(Icons.check_circle, color: Colors.green, size: 22),
+                          const Icon(
+                            Icons.check_circle,
+                            color: Colors.green,
+                            size: 22,
+                          ),
                         if (_isAnswered && isSelected && _correctIndex != index)
                           const Icon(Icons.cancel, color: Colors.red, size: 22),
                       ],
@@ -261,19 +302,27 @@ class _QuestionScreenState extends State<QuestionScreen> {
                   backgroundColor: AppColors.deepSaffron,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
                 ),
                 child: Text(
                   _currentQuestionIndex < _totalQuestions - 1
                       ? (isTelugu ? 'తదుపరి ప్రశ్న →' : 'Next Question →')
                       : (isTelugu ? 'ఫలితాలు చూడండి' : 'See Results'),
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               )
             else
               Text(
                 isTelugu ? 'ఒక సమాధానాన్ని ఎంచుకోండి' : 'Select an answer',
-                style: const TextStyle(color: AppColors.softBrown, fontStyle: FontStyle.italic),
+                style: const TextStyle(
+                  color: AppColors.softBrown,
+                  fontStyle: FontStyle.italic,
+                ),
                 textAlign: TextAlign.center,
               ),
           ],

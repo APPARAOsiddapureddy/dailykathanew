@@ -33,6 +33,7 @@ dependencies:
   provider: ^6.1.5+1
   http: ^1.6.0
   shared_preferences: ^2.5.5
+  url_launcher: ^6.3.1
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

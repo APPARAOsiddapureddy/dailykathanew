@@ -34,12 +34,14 @@ class _QuizReviewScreenState extends State<QuizReviewScreen> {
     try {
       final dayData = await apiService.fetchStoryDay(widget.journey.id, widget.episode.dayNumber);
       final fetchedQuestions = dayData['questions'] as List<dynamic>? ?? [];
+      final latestAttempt = await _loadLatestAttempt();
+      final attemptAnswers = _parseAttemptAnswers(latestAttempt);
 
-      List<_ReviewQuestion> questions = [];
+      final List<_ReviewQuestion> questions = [];
 
       for (final q in fetchedQuestions) {
         final optionsData = q['options'] as List<dynamic>? ?? [];
-        List<_ReviewOption> options = optionsData.map((o) => _ReviewOption(
+        final List<_ReviewOption> options = optionsData.map((o) => _ReviewOption(
           id: o['id'] as String,
           label: o['label'] as String,
           text: o['text'] as String,
@@ -58,11 +60,19 @@ class _QuizReviewScreenState extends State<QuizReviewScreen> {
           } catch (_) {}
         }
 
+        final questionId = q['id']?.toString() ?? '';
+        final attempt = attemptAnswers[questionId];
+        final userOptionId = attempt?.selectedOptionId;
+        final userOptionText = attempt?.selectedOptionText ??
+            _textForOption(options, userOptionId);
+
         questions.add(_ReviewQuestion(
           questionText: q['questionText'] as String,
           options: options,
           correctOptionId: correctOptionId,
           correctOptionText: correctOptionText ?? '',
+          userOptionId: userOptionId,
+          userOptionText: userOptionText,
         ));
       }
 
@@ -75,6 +85,16 @@ class _QuizReviewScreenState extends State<QuizReviewScreen> {
     } catch (e) {
       debugPrint('Error fetching quiz for review: $e');
       if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<Map<String, _AttemptAnswer>> _loadLatestAttempt() async {
+    try {
+      final latestAttempt = await apiService.fetchLatestQuizAttempt(widget.episode.id);
+      return _parseAttemptAnswers(latestAttempt);
+    } catch (e) {
+      debugPrint('Error loading latest quiz attempt: $e');
+      return {};
     }
   }
 
@@ -173,6 +193,46 @@ class _QuizReviewScreenState extends State<QuizReviewScreen> {
                               ),
                               const SizedBox(height: 14),
 
+                              if (question.userOptionText.isNotEmpty) ...[
+                                Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: question.userOptionId != null &&
+                                            question.userOptionId == question.correctOptionId
+                                        ? Colors.green.withValues(alpha: 0.08)
+                                        : Colors.blue.withValues(alpha: 0.08),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Your answer',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          color: question.userOptionId != null &&
+                                                  question.userOptionId == question.correctOptionId
+                                              ? Colors.green
+                                              : Colors.blue,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        question.userOptionText,
+                                        style: const TextStyle(
+                                          fontSize: 15,
+                                          color: AppColors.sacredMaroon,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                              ],
+
                               // Correct answer
                               Container(
                                 width: double.infinity,
@@ -221,10 +281,61 @@ class _ReviewQuestion {
   final List<_ReviewOption> options;
   final String? correctOptionId;
   final String correctOptionText;
+  final String? userOptionId;
+  final String userOptionText;
   _ReviewQuestion({
     required this.questionText,
     required this.options,
     this.correctOptionId,
     required this.correctOptionText,
+    this.userOptionId,
+    this.userOptionText = '',
   });
+}
+
+class _AttemptAnswer {
+  final String? selectedOptionId;
+  final String? selectedOptionText;
+
+  _AttemptAnswer({this.selectedOptionId, this.selectedOptionText});
+}
+
+Map<String, _AttemptAnswer> _parseAttemptAnswers(dynamic raw) {
+  final data = raw is Map<String, dynamic>
+      ? (raw['attempt'] as Map<String, dynamic>? ?? raw)
+      : <String, dynamic>{};
+  final result = <String, _AttemptAnswer>{};
+  final answerLists = [
+    data['answers'],
+    data['attemptAnswers'],
+    data['questionAnswers'],
+  ];
+
+  for (final answerList in answerLists) {
+    if (answerList is! List) continue;
+    for (final item in answerList) {
+      if (item is! Map) continue;
+      final questionId = (item['questionId'] ?? item['question'] ?? item['id'])?.toString();
+      if (questionId == null || questionId.isEmpty) continue;
+
+      final selectedOption = item['selectedOption'];
+      final selectedOptionMap = selectedOption is Map ? selectedOption : null;
+      result[questionId] = _AttemptAnswer(
+        selectedOptionId: (item['selectedOptionId'] ?? item['optionId'] ?? selectedOptionMap?['id'])?.toString(),
+        selectedOptionText: (item['selectedOptionText'] ?? item['optionText'] ?? selectedOptionMap?['text'])?.toString(),
+      );
+    }
+  }
+
+  return result;
+}
+
+String _textForOption(List<_ReviewOption> options, String? optionId) {
+  if (optionId == null || optionId.isEmpty) return '';
+  for (final option in options) {
+    if (option.id == optionId) {
+      return option.text;
+    }
+  }
+  return '';
 }

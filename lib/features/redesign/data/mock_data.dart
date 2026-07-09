@@ -1,4 +1,7 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'api_service.dart';
 
@@ -96,6 +99,9 @@ class StoryProgressInfo {
 }
 
 class AppState extends ChangeNotifier {
+  static const _secureStorage = FlutterSecureStorage();
+  static const _authTokenKey = 'auth_token';
+
   AppLanguage _language = AppLanguage.telugu;
   AppLanguage get language => _language;
 
@@ -119,6 +125,7 @@ class AppState extends ChangeNotifier {
   // User-specific progress
   Map<String, StoryProgressInfo> _storyProgressMap = {};
   Set<String> _completedDayIds = {};
+  Map<String, int> _lastPhotoIndexByDayId = {};
 
   /// Total completed days across all stories for this user
   int get completedDays {
@@ -133,10 +140,15 @@ class AppState extends ChangeNotifier {
   int get storiesStarted => _storyProgressMap.length;
 
   /// Get progress for a specific story
-  StoryProgressInfo? getStoryProgress(String storyId) => _storyProgressMap[storyId];
+  StoryProgressInfo? getStoryProgress(String storyId) =>
+      _storyProgressMap[storyId];
 
   /// Check if a specific day is completed
-  bool isDayCompleted(String storyDayId) => _completedDayIds.contains(storyDayId);
+  bool isDayCompleted(String storyDayId) =>
+      _completedDayIds.contains(storyDayId);
+
+  int getLastPhotoIndexForDay(String storyDayId) =>
+      _lastPhotoIndexByDayId[storyDayId] ?? 0;
 
   /// Get completed days count for a specific story
   int getCompletedDaysForStory(String storyId) {
@@ -151,7 +163,15 @@ class AppState extends ChangeNotifier {
   Future<void> _initUser() async {
     final prefs = await SharedPreferences.getInstance();
     _userName = prefs.getString('user_name') ?? "Guest";
-    _authToken = prefs.getString('auth_token');
+    _authToken = await _secureStorage.read(key: _authTokenKey);
+    final legacyToken = prefs.getString(_authTokenKey);
+    if ((_authToken == null || _authToken!.isEmpty) &&
+        legacyToken != null &&
+        legacyToken.isNotEmpty) {
+      _authToken = legacyToken;
+      await _secureStorage.write(key: _authTokenKey, value: legacyToken);
+      await prefs.remove(_authTokenKey);
+    }
     if (_authToken != null && _authToken!.isNotEmpty) {
       apiService.setAuthToken(_authToken!);
       await _fetchUserProfile();
@@ -166,7 +186,10 @@ class AppState extends ChangeNotifier {
       if (user != null) {
         _userName = user['name'] ?? _userName;
         _streak = user['currentStreak'] ?? 0;
-        _points = user['points'] ?? 0;
+        final serverPoints = user['points'] ?? 0;
+        if (serverPoints is int) {
+          _points = math.max(_points, serverPoints);
+        }
         notifyListeners();
       }
       await _fetchProgress();
@@ -198,9 +221,16 @@ class AppState extends ChangeNotifier {
       }
 
       _completedDayIds = {};
+      _lastPhotoIndexByDayId = {};
       for (final kp in kathaProgress) {
+        final storyDayId = kp['storyDayId'] as String?;
+        if (storyDayId == null) continue;
+        final lastPhotoIndex = kp['lastPhotoIndex'];
+        if (lastPhotoIndex is int) {
+          _lastPhotoIndexByDayId[storyDayId] = lastPhotoIndex;
+        }
         if (kp['status'] == 'COMPLETED') {
-          _completedDayIds.add(kp['storyDayId'] as String);
+          _completedDayIds.add(storyDayId);
         }
       }
 
@@ -227,12 +257,16 @@ class AppState extends ChangeNotifier {
     if (user != null) {
       _userName = user['name'] ?? _userName;
       _streak = user['currentStreak'] ?? 0;
-      _points = user['points'] ?? 0;
+      final serverPoints = user['points'] ?? 0;
+      if (serverPoints is int) {
+        _points = math.max(_points, serverPoints);
+      }
     }
 
     // Store token + name locally
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('auth_token', _authToken!);
+    await _secureStorage.write(key: _authTokenKey, value: _authToken!);
+    await prefs.remove(_authTokenKey);
     await prefs.setString('user_phone', phoneNumber);
     if (user?['name'] != null) {
       await prefs.setString('user_name', user['name']);
@@ -246,9 +280,22 @@ class AppState extends ChangeNotifier {
     _authToken = null;
     _storyProgressMap = {};
     _completedDayIds = {};
+    _lastPhotoIndexByDayId = {};
+    apiService.clearAuthToken();
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('auth_token');
+    await _secureStorage.delete(key: _authTokenKey);
+    await prefs.remove(_authTokenKey);
     notifyListeners();
+  }
+
+  Future<void> logout() async {
+    _userName = "Guest";
+    _streak = 0;
+    _points = 0;
+    await _clearAuth();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('user_phone');
+    await prefs.remove('user_name');
   }
 
   /// Mark a story day as completed
@@ -259,6 +306,56 @@ class AppState extends ChangeNotifier {
       await refreshUserData();
     } catch (e) {
       debugPrint('Error completing story day: $e');
+    }
+  }
+
+  Future<void> updateStoryDayProgress(
+    String storyDayId,
+    int lastPhotoIndex,
+  ) async {
+    if (!isLoggedIn) return;
+    _lastPhotoIndexByDayId[storyDayId] = lastPhotoIndex;
+    try {
+      await apiService.updateStoryDayProgress(storyDayId, lastPhotoIndex);
+    } catch (e) {
+      debugPrint('Error updating story day progress: $e');
+    }
+  }
+
+  Future<Map<String, dynamic>?> submitQuizAttempt(
+    String storyDayId,
+    List<Map<String, dynamic>> answers,
+    {int? pointsEarned,
+    int? correctCount,
+    }
+  ) async {
+    if (!isLoggedIn) return null;
+    try {
+      final response = await apiService.submitQuizAttempt(
+        storyDayId,
+        answers,
+        pointsEarned: pointsEarned,
+        correctCount: correctCount,
+      );
+      final serverPoints =
+          response['points'] ?? response['totalPoints'] ?? response['currentPoints'];
+      if (serverPoints is int) {
+        _points = math.max(_points, serverPoints);
+        notifyListeners();
+      }
+      return response;
+    } catch (e) {
+      debugPrint('Error submitting quiz attempt: $e');
+      return null;
+    }
+  }
+
+  Future<void> deleteAccount() async {
+    if (!isLoggedIn) return;
+    try {
+      await apiService.deleteAccount();
+    } finally {
+      await logout();
     }
   }
 
@@ -277,52 +374,61 @@ class AppState extends ChangeNotifier {
     notifyListeners();
     try {
       final storiesData = await apiService.fetchStories();
-      _journeys = await Future.wait(storiesData.map((s) async {
-        final days = (s['days'] as List?) ?? [];
-        final episodes = days.map((d) => Episode(
-          id: d['id'],
-          dayNumber: d['dayNumber'],
-          title: d['title'] ?? 'Day ${d['dayNumber']}',
-        )).toList();
+      _journeys = await Future.wait(
+        storiesData.map((s) async {
+          final days = (s['days'] as List?) ?? [];
+          final episodes = days
+              .map(
+                (d) => Episode(
+                  id: d['id'],
+                  dayNumber: d['dayNumber'],
+                  title: d['title'] ?? 'Day ${d['dayNumber']}',
+                ),
+              )
+              .toList();
 
-        // Prefer the CMS cover. Older stories without one use their first
-        // published day's share image or first photo as the heading image.
-        String coverAsset = 'assets/mahabharatam-cover.png';
-        String? rawUrl = s['coverImageUrl']?.toString().trim();
-        if ((rawUrl == null || !rawUrl.startsWith('http')) && days.isNotEmpty) {
-          final firstDayNumber = days.first['dayNumber'];
-          if (firstDayNumber is int) {
-            try {
-              rawUrl = await apiService.fetchStoryHeadingImage(
-                s['id'].toString(),
-                firstDayNumber,
-              );
-            } catch (error) {
-              debugPrint('Error loading heading image for ${s['title']}: $error');
+          // Prefer the CMS cover. Older stories without one use their first
+          // published day's share image or first photo as the heading image.
+          String coverAsset = 'assets/mahabharatam-cover.png';
+          String? rawUrl = s['coverImageUrl']?.toString().trim();
+          if ((rawUrl == null || !rawUrl.startsWith('http')) &&
+              days.isNotEmpty) {
+            final firstDayNumber = days.first['dayNumber'];
+            if (firstDayNumber is int) {
+              try {
+                rawUrl = await apiService.fetchStoryHeadingImage(
+                  s['id'].toString(),
+                  firstDayNumber,
+                );
+              } catch (error) {
+                debugPrint(
+                  'Error loading heading image for ${s['title']}: $error',
+                );
+              }
             }
           }
-        }
-        if (rawUrl != null && rawUrl.startsWith('http')) {
-          coverAsset = ApiService.proxiedImageUrl(rawUrl);
-        }
+          if (rawUrl != null && rawUrl.startsWith('http')) {
+            coverAsset = ApiService.proxiedImageUrl(rawUrl);
+          }
 
-        return Journey(
-          id: s['id'],
-          title: s['title'] ?? '',
-          description: s['description'] ?? '',
-          totalDays: days.length,
-          partNamePlural: 'Days',
-          parts: [
-            JourneyPart(
-              title: 'All Chapters',
-              totalDays: days.length,
-              episodes: episodes,
-            )
-          ],
-          coverAsset: coverAsset,
-          categoryName: s['category']?['name'] ?? '',
-        );
-      }));
+          return Journey(
+            id: s['id'],
+            title: s['title'] ?? '',
+            description: s['description'] ?? '',
+            totalDays: days.length,
+            partNamePlural: 'Days',
+            parts: [
+              JourneyPart(
+                title: 'All Chapters',
+                totalDays: days.length,
+                episodes: episodes,
+              ),
+            ],
+            coverAsset: coverAsset,
+            categoryName: s['category']?['name'] ?? '',
+          );
+        }),
+      );
 
       // If logged in, mark episodes with completion status
       if (isLoggedIn && _completedDayIds.isNotEmpty) {
@@ -348,7 +454,8 @@ class AppState extends ChangeNotifier {
     await _fetchProgress();
   }
 
-  List<Journey> get currentJourneys => _journeys.isNotEmpty ? _journeys : _mockFallback();
+  List<Journey> get currentJourneys =>
+      _journeys.isNotEmpty ? _journeys : _mockFallback();
 
   Journey get activeJourney => currentJourneys.first;
 

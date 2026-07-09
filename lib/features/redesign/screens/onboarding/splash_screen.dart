@@ -2,11 +2,11 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../auth/auth_screens.dart';
 import '../main/main_shell.dart';
-import 'language_screen.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -17,6 +17,9 @@ class SplashScreen extends StatefulWidget {
 
 class _SplashScreenState extends State<SplashScreen>
     with SingleTickerProviderStateMixin {
+  static const _secureStorage = FlutterSecureStorage();
+  static const _authTokenKey = 'auth_token';
+
   late AnimationController _spinnerController;
 
   @override
@@ -29,7 +32,15 @@ class _SplashScreenState extends State<SplashScreen>
 
     Future.delayed(const Duration(seconds: 4), () async {
       final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
+      var token = await _secureStorage.read(key: _authTokenKey);
+      final legacyToken = prefs.getString(_authTokenKey);
+      if ((token == null || token.isEmpty) &&
+          legacyToken != null &&
+          legacyToken.isNotEmpty) {
+        token = legacyToken;
+        await _secureStorage.write(key: _authTokenKey, value: legacyToken);
+        await prefs.remove(_authTokenKey);
+      }
       if (mounted) {
         if (token != null && token.isNotEmpty) {
           // User has a stored token — go to home
@@ -96,9 +107,9 @@ class _SplashScreenState extends State<SplashScreen>
                     height: 118,
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(34),
-                      color: const Color(0xFFFFF6E4).withOpacity(0.14),
+                      color: const Color(0xFFFFF6E4).withValues(alpha: 0.14),
                       border: Border.all(
-                        color: const Color(0xFFFFF6E4).withOpacity(0.32),
+                        color: const Color(0xFFFFF6E4).withValues(alpha: 0.32),
                         width: 1,
                       ),
                     ),
@@ -151,7 +162,7 @@ class _SplashScreenState extends State<SplashScreen>
                       fontSize: 14,
                       fontWeight: FontWeight.w400,
                       fontFamily: 'Noto Sans Telugu',
-                      color: const Color(0xFFFFF0DC).withOpacity(0.82),
+                      color: const Color(0xFFFFF0DC).withValues(alpha: 0.82),
                       height: 1.6,
                     ),
                     textAlign: TextAlign.center,
@@ -189,7 +200,7 @@ class _SplashScreenState extends State<SplashScreen>
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w400,
-                      color: const Color(0xFFFFF0DC).withOpacity(0.6),
+                      color: const Color(0xFFFFF0DC).withValues(alpha: 0.6),
                       letterSpacing: 0.48,
                     ),
                   ),
@@ -216,7 +227,7 @@ class _SpinnerPainter extends CustomPainter {
 
     // Background circle
     final bgPaint = Paint()
-      ..color = const Color(0xFFFFF0D6).withOpacity(0.35)
+      ..color = const Color(0xFFFFF0D6).withValues(alpha: 0.35)
       ..strokeWidth = 2.5
       ..style = PaintingStyle.stroke;
     canvas.drawCircle(center, radius, bgPaint);
@@ -249,7 +260,7 @@ class _RaysPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = const Color(0xFFFDEBC0).withOpacity(0.28)
+      ..color = const Color(0xFFFDEBC0).withValues(alpha: 0.28)
       ..strokeWidth = 1.8
       ..strokeCap = StrokeCap.round;
 
@@ -257,13 +268,13 @@ class _RaysPainter extends CustomPainter {
 
     // Ray definitions from the HTML SVG viewBox 0 0 100 100:
     final rays = [
-      [50.0, 6.0, 50.0, 18.0],   // top center
-      [72.0, 12.0, 66.0, 23.0],  // upper right
-      [88.0, 28.0, 77.0, 34.0],  // right
-      [94.0, 50.0, 82.0, 50.0],  // far right
-      [28.0, 12.0, 34.0, 23.0],  // upper left
-      [12.0, 28.0, 23.0, 34.0],  // left
-      [6.0, 50.0, 18.0, 50.0],   // far left
+      [50.0, 6.0, 50.0, 18.0], // top center
+      [72.0, 12.0, 66.0, 23.0], // upper right
+      [88.0, 28.0, 77.0, 34.0], // right
+      [94.0, 50.0, 82.0, 50.0], // far right
+      [28.0, 12.0, 34.0, 23.0], // upper left
+      [12.0, 28.0, 23.0, 34.0], // left
+      [6.0, 50.0, 18.0, 50.0], // far left
     ];
 
     for (final ray in rays) {

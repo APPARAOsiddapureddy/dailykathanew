@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 
 import '../../data/mock_data.dart';
 import '../../theme/redesign_theme.dart';
-import '../story/universe_detail_screen.dart';
 import '../../widgets/story_list_card.dart';
 
 enum StoryFilter { all, started, completed, notStarted }

@@ -16,6 +16,10 @@ class ApiService {
     _authToken = token;
   }
 
+  void clearAuthToken() {
+    _authToken = null;
+  }
+
   Map<String, String> get _headers {
     final headers = <String, String>{'Content-Type': 'application/json'};
     if (_authToken != null) {
@@ -40,7 +44,10 @@ class ApiService {
   }
 
   /// Create or login session → returns {token, user}
-  Future<Map<String, dynamic>> createSession(String phoneNumber, {String? name}) async {
+  Future<Map<String, dynamic>> createSession(
+    String phoneNumber, {
+    String? name,
+  }) async {
     final body = <String, dynamic>{'phoneNumber': phoneNumber};
     if (name != null) body['name'] = name;
 
@@ -97,9 +104,14 @@ class ApiService {
     }
   }
 
-  Future<Map<String, dynamic>> fetchStoryDay(String storyId, int dayNumber) async {
+  Future<Map<String, dynamic>> fetchStoryDay(
+    String storyId,
+    int dayNumber,
+  ) async {
     try {
-      final response = await http.get(Uri.parse('$baseUrl/app/stories/$storyId/days/$dayNumber'));
+      final response = await http.get(
+        Uri.parse('$baseUrl/app/stories/$storyId/days/$dayNumber'),
+      );
       if (response.statusCode == 200) {
         return json.decode(response.body);
       } else {
@@ -136,7 +148,10 @@ class ApiService {
     return null;
   }
 
-  Future<Map<String, dynamic>> checkAnswer(String questionId, String optionId) async {
+  Future<Map<String, dynamic>> checkAnswer(
+    String questionId,
+    String optionId,
+  ) async {
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/app/questions/$questionId/check-answer'),
@@ -164,6 +179,78 @@ class ApiService {
       }
     } catch (e) {
       throw Exception('Error completing story day: $e');
+    }
+  }
+
+  Future<void> updateStoryDayProgress(
+    String storyDayId,
+    int lastPhotoIndex,
+  ) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/app/story-days/$storyDayId/progress'),
+        headers: _headers,
+        body: json.encode({'lastPhotoIndex': lastPhotoIndex}),
+      );
+      if (response.statusCode != 200) {
+        throw Exception('Failed to update story day progress');
+      }
+    } catch (e) {
+      throw Exception('Error updating story day progress: $e');
+    }
+  }
+
+  Future<Map<String, dynamic>> submitQuizAttempt(
+    String storyDayId,
+    List<Map<String, dynamic>> answers,
+    {int? pointsEarned,
+    int? correctCount,
+    }
+  ) async {
+    try {
+      final body = <String, dynamic>{'answers': answers};
+      if (pointsEarned != null) body['pointsEarned'] = pointsEarned;
+      if (correctCount != null) body['correctCount'] = correctCount;
+      final response = await http.post(
+        Uri.parse('$baseUrl/app/story-days/$storyDayId/quiz-attempts'),
+        headers: _headers,
+        body: json.encode(body),
+      );
+      if (response.statusCode == 201 || response.statusCode == 200) {
+        return json.decode(response.body);
+      }
+      throw Exception('Failed to submit quiz attempt');
+    } catch (e) {
+      throw Exception('Error submitting quiz attempt: $e');
+    }
+  }
+
+  Future<Map<String, dynamic>> fetchLatestQuizAttempt(String storyDayId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/app/story-days/$storyDayId/quiz-attempts/latest'),
+        headers: _headers,
+      );
+      if (response.statusCode == 200) {
+        return json.decode(response.body);
+      }
+      throw Exception('Failed to fetch latest quiz attempt');
+    } catch (e) {
+      throw Exception('Error fetching latest quiz attempt: $e');
+    }
+  }
+
+  Future<void> deleteAccount() async {
+    try {
+      final response = await http.delete(
+        Uri.parse('$baseUrl/users/me'),
+        headers: _headers,
+      );
+      if (response.statusCode != 200 && response.statusCode != 204) {
+        throw Exception('Failed to delete account');
+      }
+    } catch (e) {
+      throw Exception('Error deleting account: $e');
     }
   }
 }

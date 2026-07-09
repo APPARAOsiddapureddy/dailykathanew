@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-
 import '../../data/mock_data.dart';
 import '../../theme/redesign_theme.dart';
 import 'story_reader_screen.dart';
-import 'quiz_review_screen.dart';
 
 class UniverseDetailScreen extends StatelessWidget {
   final Journey journey;
@@ -56,7 +54,10 @@ class UniverseDetailScreen extends StatelessWidget {
                         ),
                   // Bottom gradient for text readability
                   Positioned(
-                    bottom: 0, left: 0, right: 0, height: 120,
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    height: 120,
                     child: Container(
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
@@ -77,7 +78,10 @@ class UniverseDetailScreen extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text('ॐ', style: TextStyle(color: AppColors.templeGold, fontSize: 16)),
+                  const Text(
+                    'ॐ',
+                    style: TextStyle(color: AppColors.templeGold, fontSize: 16),
+                  ),
                   Text(
                     journey.title,
                     style: const TextStyle(
@@ -90,7 +94,10 @@ class UniverseDetailScreen extends StatelessWidget {
                     isTelugu
                         ? '${allEpisodes.length} రోజులు'
                         : '${allEpisodes.length} Days',
-                    style: const TextStyle(color: AppColors.ivoryLight, fontSize: 12),
+                    style: const TextStyle(
+                      color: AppColors.ivoryLight,
+                      fontSize: 12,
+                    ),
                   ),
                 ],
               ),
@@ -128,26 +135,28 @@ class UniverseDetailScreen extends StatelessWidget {
                         isTelugu
                             ? 'ఈ కథకు ఇంకా రోజులు జోడించబడలేదు'
                             : 'No days available for this story yet',
-                        style: const TextStyle(color: AppColors.softBrown, fontSize: 16),
+                        style: const TextStyle(
+                          color: AppColors.softBrown,
+                          fontSize: 16,
+                        ),
                         textAlign: TextAlign.center,
                       ),
                     ),
                   ),
                 )
               : SliverList(
-                  delegate: SliverChildBuilderDelegate(
-                    (context, index) {
-                      final episode = allEpisodes[index];
-                      final isCompleted = context.read<AppState>().isDayCompleted(episode.id);
-                      return _DayTile(
-                        episode: episode,
-                        journey: journey,
-                        isTelugu: isTelugu,
-                        isCompleted: isCompleted,
-                      );
-                    },
-                    childCount: allEpisodes.length,
-                  ),
+                  delegate: SliverChildBuilderDelegate((context, index) {
+                    final episode = allEpisodes[index];
+                    final isCompleted = context.read<AppState>().isDayCompleted(
+                      episode.id,
+                    );
+                    return _DayTile(
+                      episode: episode,
+                      journey: journey,
+                      isTelugu: isTelugu,
+                      isCompleted: isCompleted,
+                    );
+                  }, childCount: allEpisodes.length),
                 ),
         ],
       ),
@@ -182,25 +191,15 @@ class _DayTile extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(14),
           onTap: () {
-            if (isCompleted) {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => QuizReviewScreen(
-                    journey: journey,
-                    episode: episode,
-                  ),
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => StoryReaderScreen(
+                  journey: journey,
+                  episode: episode,
+                  reviewAfterReading: isCompleted,
                 ),
-              );
-            } else {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => StoryReaderScreen(
-                    journey: journey,
-                    episode: episode,
-                  ),
-                ),
-              );
-            }
+              ),
+            );
           },
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -272,7 +271,10 @@ class _DayTile extends StatelessWidget {
                     children: [
                       // View Quiz Results label
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
                         decoration: BoxDecoration(
                           color: const Color(0xFFFBEAD2),
                           borderRadius: BorderRadius.circular(8),
@@ -287,11 +289,19 @@ class _DayTile extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      const Icon(Icons.check_circle, color: Colors.green, size: 28),
+                      const Icon(
+                        Icons.check_circle,
+                        color: Colors.green,
+                        size: 28,
+                      ),
                     ],
                   )
                 else
-                  const Icon(Icons.play_circle_fill, color: Color(0xFFE0701C), size: 28),
+                  const Icon(
+                    Icons.play_circle_fill,
+                    color: Color(0xFFE0701C),
+                    size: 28,
+                  ),
               ],
             ),
           ),
