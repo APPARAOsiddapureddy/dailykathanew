@@ -43,16 +43,17 @@ class ApiService {
     throw Exception('Failed to check phone');
   }
 
-  /// Create or login session → returns {token, user}
-  Future<Map<String, dynamic>> createSession(
-    String phoneNumber, {
+  /// Exchange a Firebase phone-auth ID token (proof the device already
+  /// verified the OTP via Firebase) for our own app session → {token, user}
+  Future<Map<String, dynamic>> firebaseLogin(
+    String idToken, {
     String? name,
   }) async {
-    final body = <String, dynamic>{'phoneNumber': phoneNumber};
+    final body = <String, dynamic>{'idToken': idToken};
     if (name != null) body['name'] = name;
 
     final response = await http.post(
-      Uri.parse('$baseUrl/users/session'),
+      Uri.parse('$baseUrl/users/firebase/session'),
       headers: {'Content-Type': 'application/json'},
       body: json.encode(body),
     );
@@ -61,7 +62,17 @@ class ApiService {
       _authToken = data['token'];
       return data;
     }
-    throw Exception('Failed to create session');
+    throw Exception(_errorMessage(response, 'Failed to verify sign-in'));
+  }
+
+  String _errorMessage(http.Response response, String fallback) {
+    try {
+      final data = json.decode(response.body);
+      if (data is Map && data['message'] is String) return data['message'];
+    } catch (_) {
+      // fall through to default message
+    }
+    return fallback;
   }
 
   /// Get current user profile

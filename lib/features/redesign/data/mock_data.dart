@@ -306,9 +306,14 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// Called after successful login/registration
-  Future<void> loginWithSession(String phoneNumber, {String? name}) async {
-    final data = await apiService.createSession(phoneNumber, name: name);
+  /// Exchanges a Firebase phone-auth ID token (already verified on-device
+  /// by Firebase) for our own app session, logging the user in.
+  Future<void> loginWithFirebaseToken(
+    String phoneNumber,
+    String idToken, {
+    String? name,
+  }) async {
+    final data = await apiService.firebaseLogin(idToken, name: name);
     _authToken = data['token'];
     final user = data['user'];
     if (user != null) {
