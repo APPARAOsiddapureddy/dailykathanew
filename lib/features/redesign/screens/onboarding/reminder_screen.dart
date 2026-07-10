@@ -5,8 +5,15 @@ import '../../../../core/services/notification_service.dart';
 import '../../data/mock_data.dart';
 import '../main/main_shell.dart';
 
-class ReminderScreen extends StatelessWidget {
+class ReminderScreen extends StatefulWidget {
   const ReminderScreen({super.key});
+
+  @override
+  State<ReminderScreen> createState() => _ReminderScreenState();
+}
+
+class _ReminderScreenState extends State<ReminderScreen> {
+  TimeOfDay _selectedTime = const TimeOfDay(hour: 7, minute: 0);
 
   void _finishOnboarding(BuildContext context) {
     Navigator.of(
@@ -14,9 +21,18 @@ class ReminderScreen extends StatelessWidget {
     ).pushReplacement(MaterialPageRoute(builder: (_) => const MainShell()));
   }
 
+  Future<void> _pickTime() async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: _selectedTime,
+    );
+    if (picked != null) setState(() => _selectedTime = picked);
+  }
+
   Future<void> _allowReminders(BuildContext context) async {
     final state = context.read<AppState>();
     final granted = await NotificationService.instance.requestPermission();
+    await state.setReminderTime(_selectedTime);
     await state.setNotificationsEnabled(granted);
     if (context.mounted) _finishOnboarding(context);
   }
@@ -24,6 +40,15 @@ class ReminderScreen extends StatelessWidget {
   Future<void> _skipReminders(BuildContext context) async {
     await context.read<AppState>().setNotificationsEnabled(false);
     if (context.mounted) _finishOnboarding(context);
+  }
+
+  String _formatTime(TimeOfDay time, bool isTelugu) {
+    final hour12 = time.hourOfPeriod == 0 ? 12 : time.hourOfPeriod;
+    final minute = time.minute.toString().padLeft(2, '0');
+    final isAm = time.period == DayPeriod.am;
+    return isTelugu
+        ? '${isAm ? 'ఉదయం' : 'సాయంత్రం'} $hour12:$minute'
+        : '$hour12:$minute ${isAm ? 'AM' : 'PM'}';
   }
 
   @override
@@ -102,37 +127,48 @@ class ReminderScreen extends StatelessWidget {
 
               const SizedBox(height: 22),
 
-              // ── Time pill ──
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 18,
-                  vertical: 10,
-                ),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFBEAD2),
-                  borderRadius: BorderRadius.circular(99),
-                  border: Border.all(color: const Color(0xFFEAD3A8), width: 1),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // Clock icon
-                    const Icon(
-                      Icons.access_time_rounded,
-                      size: 16,
-                      color: Color(0xFFB07A2A),
+              // ── Time pill (tap to change) ──
+              GestureDetector(
+                onTap: _pickTime,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFBEAD2),
+                    borderRadius: BorderRadius.circular(99),
+                    border: Border.all(
+                      color: const Color(0xFFEAD3A8),
+                      width: 1,
                     ),
-                    const SizedBox(width: 8),
-                    Text(
-                      isTelugu ? 'ఉదయం 7:00' : '7:00 AM',
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        fontFamily: 'Noto Sans Telugu',
-                        color: Color(0xFF8A5A14),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.access_time_rounded,
+                        size: 16,
+                        color: Color(0xFFB07A2A),
                       ),
-                    ),
-                  ],
+                      const SizedBox(width: 8),
+                      Text(
+                        _formatTime(_selectedTime, isTelugu),
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          fontFamily: 'Noto Sans Telugu',
+                          color: Color(0xFF8A5A14),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      const Icon(
+                        Icons.edit_outlined,
+                        size: 14,
+                        color: Color(0xFFB07A2A),
+                      ),
+                    ],
+                  ),
                 ),
               ),
 

@@ -28,8 +28,13 @@ class AnsweredQuestion {
 }
 
 class QuestionScreen extends StatefulWidget {
+  final Journey journey;
   final Episode episode;
-  const QuestionScreen({super.key, required this.episode});
+  const QuestionScreen({
+    super.key,
+    required this.journey,
+    required this.episode,
+  });
 
   @override
   State<QuestionScreen> createState() => _QuestionScreenState();
@@ -141,6 +146,7 @@ class _QuestionScreenState extends State<QuestionScreen> {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
             builder: (_) => QuizResultsScreen(
+              journey: widget.journey,
               episode: widget.episode,
               answeredQuestions: _answeredQuestions,
               pointsEarned: pointsEarned,

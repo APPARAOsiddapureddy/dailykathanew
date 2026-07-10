@@ -613,6 +613,19 @@ class AppState extends ChangeNotifier {
     return journeys.first;
   }
 
+  /// The day right after [current] in [journey] (by day number), or null
+  /// if [current] is the last day.
+  Episode? getNextEpisode(Journey journey, Episode current) {
+    final allEpisodes = <Episode>[];
+    for (final part in journey.parts) {
+      allEpisodes.addAll(part.episodes);
+    }
+    allEpisodes.sort((a, b) => a.dayNumber.compareTo(b.dayNumber));
+    final index = allEpisodes.indexWhere((e) => e.id == current.id);
+    if (index == -1 || index == allEpisodes.length - 1) return null;
+    return allEpisodes[index + 1];
+  }
+
   List<Journey> _mockFallback() {
     return [
       Journey(

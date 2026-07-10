@@ -146,6 +146,28 @@ class _StoryReaderScreenState extends State<StoryReaderScreen>
     _finishStory();
   }
 
+  void _handleTap(TapUpDetails details, int totalCards) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final tappedLeft = details.globalPosition.dx < screenWidth * 0.3;
+    if (tappedLeft) {
+      if (_currentIndex > 0) {
+        _pageController?.previousPage(
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        );
+      }
+    } else {
+      if (_currentIndex < totalCards - 1) {
+        _pageController?.nextPage(
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        );
+      } else {
+        _handleEndOverscroll();
+      }
+    }
+  }
+
   void _finishStory() {
     _persistProgress();
 
@@ -162,7 +184,8 @@ class _StoryReaderScreenState extends State<StoryReaderScreen>
     if (widget.episode.quizzes.isNotEmpty) {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (_) => QuestionScreen(episode: widget.episode),
+          builder: (_) =>
+              QuestionScreen(journey: widget.journey, episode: widget.episode),
         ),
       );
     } else {
@@ -171,7 +194,10 @@ class _StoryReaderScreenState extends State<StoryReaderScreen>
       context.read<AppState>().completeStoryDay(widget.episode.id);
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (_) => DayCompleteScreen(episode: widget.episode),
+          builder: (_) => DayCompleteScreen(
+            journey: widget.journey,
+            episode: widget.episode,
+          ),
         ),
       );
     }
@@ -211,41 +237,45 @@ class _StoryReaderScreenState extends State<StoryReaderScreen>
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // ── Swipeable full-screen photos ──
-          NotificationListener<OverscrollNotification>(
-            onNotification: (notification) {
-              if (notification.overscroll > 0 &&
-                  _currentIndex == totalCards - 1) {
-                _handleEndOverscroll();
-              }
-              return false;
-            },
-            child: PageView.builder(
-              controller: _pageController,
-              itemCount: totalCards,
-              onPageChanged: _onPageChanged,
-              itemBuilder: (context, index) {
-                final card = widget.episode.cards[index];
-                return card.imageUrl != null
-                    ? Image.network(
-                        card.imageUrl!,
-                        fit: BoxFit.cover,
-                        width: double.infinity,
-                        height: double.infinity,
-                        errorBuilder: (_, __, ___) => Image.asset(
+          // ── Swipeable + tappable full-screen photos ──
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTapUp: (details) => _handleTap(details, totalCards),
+            child: NotificationListener<OverscrollNotification>(
+              onNotification: (notification) {
+                if (notification.overscroll > 0 &&
+                    _currentIndex == totalCards - 1) {
+                  _handleEndOverscroll();
+                }
+                return false;
+              },
+              child: PageView.builder(
+                controller: _pageController,
+                itemCount: totalCards,
+                onPageChanged: _onPageChanged,
+                itemBuilder: (context, index) {
+                  final card = widget.episode.cards[index];
+                  return card.imageUrl != null
+                      ? Image.network(
+                          card.imageUrl!,
+                          fit: BoxFit.cover,
+                          width: double.infinity,
+                          height: double.infinity,
+                          errorBuilder: (_, __, ___) => Image.asset(
+                            'assets/mahabharatam-cover.png',
+                            fit: BoxFit.cover,
+                            width: double.infinity,
+                            height: double.infinity,
+                          ),
+                        )
+                      : Image.asset(
                           'assets/mahabharatam-cover.png',
                           fit: BoxFit.cover,
                           width: double.infinity,
                           height: double.infinity,
-                        ),
-                      )
-                    : Image.asset(
-                        'assets/mahabharatam-cover.png',
-                        fit: BoxFit.cover,
-                        width: double.infinity,
-                        height: double.infinity,
-                      );
-              },
+                        );
+                },
+              ),
             ),
           ),
 

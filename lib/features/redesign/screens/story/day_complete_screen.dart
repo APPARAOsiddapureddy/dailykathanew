@@ -4,15 +4,22 @@ import 'package:provider/provider.dart';
 import '../../data/mock_data.dart';
 import '../../theme/redesign_theme.dart';
 import '../main/main_shell.dart';
+import 'story_reader_screen.dart';
 
 class DayCompleteScreen extends StatelessWidget {
+  final Journey journey;
   final Episode episode;
-  const DayCompleteScreen({super.key, required this.episode});
+  const DayCompleteScreen({
+    super.key,
+    required this.journey,
+    required this.episode,
+  });
 
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final isTelugu = state.language == AppLanguage.telugu;
+    final nextEpisode = state.getNextEpisode(journey, episode);
 
     return Scaffold(
       backgroundColor: AppColors.warmIvory,
@@ -127,7 +134,29 @@ class DayCompleteScreen extends StatelessWidget {
                 ),
               ),
               const Spacer(),
-              ElevatedButton(
+              if (nextEpisode != null) ...[
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.of(context).pushReplacement(
+                      MaterialPageRoute(
+                        builder: (_) => StoryReaderScreen(
+                          journey: journey,
+                          episode: nextEpisode,
+                        ),
+                      ),
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.deepSaffron,
+                    foregroundColor: Colors.white,
+                  ),
+                  child: Text(
+                    isTelugu ? 'తదుపరి రోజుకు వెళ్ళండి →' : 'Go to Next Day →',
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+              OutlinedButton(
                 onPressed: () {
                   Navigator.of(context).pushAndRemoveUntil(
                     MaterialPageRoute(builder: (_) => const MainShell()),

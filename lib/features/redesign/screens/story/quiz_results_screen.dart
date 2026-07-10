@@ -5,14 +5,17 @@ import '../../data/mock_data.dart';
 import '../../theme/redesign_theme.dart';
 import '../main/main_shell.dart';
 import 'question_screen.dart';
+import 'story_reader_screen.dart';
 
 class QuizResultsScreen extends StatelessWidget {
+  final Journey journey;
   final Episode episode;
   final List<AnsweredQuestion> answeredQuestions;
   final int pointsEarned;
 
   const QuizResultsScreen({
     super.key,
+    required this.journey,
     required this.episode,
     required this.answeredQuestions,
     required this.pointsEarned,
@@ -22,6 +25,7 @@ class QuizResultsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final isTelugu = state.language == AppLanguage.telugu;
+    final nextEpisode = state.getNextEpisode(journey, episode);
 
     final correctCount = answeredQuestions.where((a) => a.isCorrect).length;
     final wrongCount = answeredQuestions.length - correctCount;
@@ -276,15 +280,46 @@ class QuizResultsScreen extends StatelessWidget {
 
               const SizedBox(height: 24),
 
+              if (nextEpisode != null) ...[
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.of(context).pushReplacement(
+                      MaterialPageRoute(
+                        builder: (_) => StoryReaderScreen(
+                          journey: journey,
+                          episode: nextEpisode,
+                        ),
+                      ),
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.deepSaffron,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  child: Text(
+                    isTelugu ? 'తదుపరి రోజుకు వెళ్ళండి →' : 'Go to Next Day →',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+
               // Return to Home
-              ElevatedButton(
+              OutlinedButton(
                 onPressed: () {
                   Navigator.of(context).pushAndRemoveUntil(
                     MaterialPageRoute(builder: (_) => const MainShell()),
                     (route) => false,
                   );
                 },
-                style: ElevatedButton.styleFrom(
+                style: OutlinedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14),
