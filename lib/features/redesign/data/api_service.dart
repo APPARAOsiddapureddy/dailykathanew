@@ -76,6 +76,28 @@ class ApiService {
     throw Exception('Failed to get user profile');
   }
 
+  /// Update the current user's profile (e.g. display name or
+  /// notification preference: ALL | DAILY_REMINDER | OFF)
+  Future<Map<String, dynamic>> updateProfile({
+    String? name,
+    String? notificationPreference,
+  }) async {
+    final body = <String, dynamic>{};
+    if (name != null) body['name'] = name;
+    if (notificationPreference != null) {
+      body['notificationPreference'] = notificationPreference;
+    }
+    final response = await http.patch(
+      Uri.parse('$baseUrl/users/me'),
+      headers: _headers,
+      body: json.encode(body),
+    );
+    if (response.statusCode == 200) {
+      return json.decode(response.body);
+    }
+    throw Exception('Failed to update profile');
+  }
+
   /// Get user progress (story progress + katha progress)
   Future<Map<String, dynamic>> getProgress() async {
     final response = await http.get(
@@ -202,11 +224,10 @@ class ApiService {
 
   Future<Map<String, dynamic>> submitQuizAttempt(
     String storyDayId,
-    List<Map<String, dynamic>> answers,
-    {int? pointsEarned,
+    List<Map<String, dynamic>> answers, {
+    int? pointsEarned,
     int? correctCount,
-    }
-  ) async {
+  }) async {
     try {
       final body = <String, dynamic>{'answers': answers};
       if (pointsEarned != null) body['pointsEarned'] = pointsEarned;

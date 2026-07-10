@@ -59,7 +59,10 @@ class HomeScreen extends StatelessWidget {
               ),
               const Spacer(),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 11,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: const Color(0xFFFBEAD2),
                   borderRadius: BorderRadius.circular(99),
@@ -68,10 +71,45 @@ class HomeScreen extends StatelessWidget {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.local_fire_department, size: 15, color: Color(0xFFE0701C)),
+                    const Icon(
+                      Icons.local_fire_department,
+                      size: 15,
+                      color: Color(0xFFE0701C),
+                    ),
                     const SizedBox(width: 4),
                     Text(
                       '${state.streak}',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFFC05A12),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 11,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFBEAD2),
+                  borderRadius: BorderRadius.circular(99),
+                  border: Border.all(color: const Color(0xFFEAD3A8), width: 1),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.stars_rounded,
+                      size: 15,
+                      color: Color(0xFFE0701C),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '${state.points}',
                       style: const TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
@@ -159,7 +197,8 @@ class HomeScreen extends StatelessWidget {
                           child: Image.network(
                             activeJourney.coverAsset,
                             fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                            errorBuilder: (_, __, ___) =>
+                                const SizedBox.shrink(),
                           ),
                         ),
                       ),
@@ -174,7 +213,9 @@ class HomeScreen extends StatelessWidget {
                           fontSize: 82,
                           fontFamily: 'Noto Serif Telugu',
                           fontWeight: FontWeight.w400,
-                          color: const Color(0xFFFFF6E4).withValues(alpha: 0.28),
+                          color: const Color(
+                            0xFFFFF6E4,
+                          ).withValues(alpha: 0.28),
                           height: 1.0,
                         ),
                       ),
@@ -187,9 +228,14 @@ class HomeScreen extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 5,
+                            ),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF3C0F0C).withValues(alpha: 0.32),
+                              color: const Color(
+                                0xFF3C0F0C,
+                              ).withValues(alpha: 0.32),
                               borderRadius: BorderRadius.circular(99),
                             ),
                             child: Text(
@@ -236,27 +282,37 @@ class HomeScreen extends StatelessWidget {
                           // Progress bar
                           Builder(
                             builder: (context) {
-                              final daysCompleted = state.getCompletedDaysForStory(activeJourney.id);
+                              final daysCompleted = state
+                                  .getCompletedDaysForStory(activeJourney.id);
                               return Row(
                                 children: [
                                   Expanded(
                                     child: Container(
                                       height: 7,
                                       decoration: BoxDecoration(
-                                        color: const Color(0xFFFFF0D6).withValues(alpha: 0.28),
+                                        color: const Color(
+                                          0xFFFFF0D6,
+                                        ).withValues(alpha: 0.28),
                                         borderRadius: BorderRadius.circular(99),
                                       ),
                                       alignment: Alignment.centerLeft,
                                       child: FractionallySizedBox(
                                         widthFactor: activeJourney.totalDays > 0
-                                            ? (daysCompleted / activeJourney.totalDays).clamp(0.0, 1.0)
+                                            ? (daysCompleted /
+                                                      activeJourney.totalDays)
+                                                  .clamp(0.0, 1.0)
                                             : 0.0,
                                         child: Container(
                                           decoration: BoxDecoration(
                                             gradient: const LinearGradient(
-                                              colors: [Color(0xFFFFE0A0), Color(0xFFFFF3DC)],
+                                              colors: [
+                                                Color(0xFFFFE0A0),
+                                                Color(0xFFFFF3DC),
+                                              ],
                                             ),
-                                            borderRadius: BorderRadius.circular(99),
+                                            borderRadius: BorderRadius.circular(
+                                              99,
+                                            ),
                                           ),
                                         ),
                                       ),
@@ -285,14 +341,18 @@ class HomeScreen extends StatelessWidget {
                               onPressed: () {
                                 Navigator.of(context).push(
                                   MaterialPageRoute(
-                                    builder: (_) => UniverseDetailScreen(journey: activeJourney),
+                                    builder: (_) => UniverseDetailScreen(
+                                      journey: activeJourney,
+                                    ),
                                   ),
                                 );
                               },
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: const Color(0xFFFFF6E7),
                                 foregroundColor: const Color(0xFFB4480F),
-                                padding: const EdgeInsets.symmetric(vertical: 13),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 13,
+                                ),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(13),
                                 ),

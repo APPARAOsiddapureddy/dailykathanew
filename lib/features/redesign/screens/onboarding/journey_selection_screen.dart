@@ -42,8 +42,11 @@ class JourneySelectionScreen extends StatelessWidget {
                     return _JourneyCard(
                       journey: journey,
                       onTap: () {
+                        context.read<AppState>().selectJourney(journey.id);
                         Navigator.of(context).pushReplacement(
-                          MaterialPageRoute(builder: (_) => const ReminderScreen()),
+                          MaterialPageRoute(
+                            builder: (_) => const ReminderScreen(),
+                          ),
                         );
                       },
                     );

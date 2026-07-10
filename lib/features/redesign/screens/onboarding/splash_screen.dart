@@ -1,10 +1,12 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../data/mock_data.dart';
 import '../auth/auth_screens.dart';
 import '../main/main_shell.dart';
 
@@ -65,6 +67,7 @@ class _SplashScreenState extends State<SplashScreen>
 
   @override
   Widget build(BuildContext context) {
+    final isTelugu = context.watch<AppState>().language == AppLanguage.telugu;
     return Scaffold(
       body: Container(
         width: double.infinity,
@@ -157,7 +160,9 @@ class _SplashScreenState extends State<SplashScreen>
 
                   // Tagline
                   Text(
-                    'ప్రతిరోజు ఒక కథ, ఒక పాఠం',
+                    isTelugu
+                        ? 'ప్రతిరోజు ఒక కథ, ఒక పాఠం'
+                        : 'One story, one lesson, every day',
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w400,
@@ -192,16 +197,6 @@ class _SplashScreenState extends State<SplashScreen>
                           ),
                         );
                       },
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  Text(
-                    'from AppsForBharat',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w400,
-                      color: const Color(0xFFFFF0DC).withValues(alpha: 0.6),
-                      letterSpacing: 0.48,
                     ),
                   ),
                 ],

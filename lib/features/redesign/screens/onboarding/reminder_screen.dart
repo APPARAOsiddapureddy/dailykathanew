@@ -1,18 +1,34 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../../../../core/services/notification_service.dart';
+import '../../data/mock_data.dart';
 import '../main/main_shell.dart';
 
 class ReminderScreen extends StatelessWidget {
   const ReminderScreen({super.key});
 
   void _finishOnboarding(BuildContext context) {
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const MainShell()),
-    );
+    Navigator.of(
+      context,
+    ).pushReplacement(MaterialPageRoute(builder: (_) => const MainShell()));
+  }
+
+  Future<void> _allowReminders(BuildContext context) async {
+    final state = context.read<AppState>();
+    final granted = await NotificationService.instance.requestPermission();
+    await state.setNotificationsEnabled(granted);
+    if (context.mounted) _finishOnboarding(context);
+  }
+
+  Future<void> _skipReminders(BuildContext context) async {
+    await context.read<AppState>().setNotificationsEnabled(false);
+    if (context.mounted) _finishOnboarding(context);
   }
 
   @override
   Widget build(BuildContext context) {
+    final isTelugu = context.watch<AppState>().language == AppLanguage.telugu;
     return Scaffold(
       backgroundColor: const Color(0xFFFAF4E8),
       body: SafeArea(
@@ -57,9 +73,9 @@ class ReminderScreen extends StatelessWidget {
               const SizedBox(height: 34),
 
               // ── Title ──
-              const Text(
-                'రోజువారీ గుర్తు',
-                style: TextStyle(
+              Text(
+                isTelugu ? 'రోజువారీ గుర్తు' : 'Daily Reminder',
+                style: const TextStyle(
                   fontSize: 30,
                   fontWeight: FontWeight.w400,
                   fontFamily: 'Noto Serif Telugu',
@@ -70,9 +86,11 @@ class ReminderScreen extends StatelessWidget {
               const SizedBox(height: 14),
 
               // ── Description ──
-              const Text(
-                'ప్రతిరోజు మీ కథను కొనసాగించడానికి మేము సున్నితంగా గుర్తు చేస్తాము — నెమ్మదిగా, గౌరవంగా.',
-                style: TextStyle(
+              Text(
+                isTelugu
+                    ? 'ప్రతిరోజు మీ కథను కొనసాగించడానికి మేము సున్నితంగా గుర్తు చేస్తాము — నెమ్మదిగా, గౌరవంగా.'
+                    : 'We\'ll gently remind you to continue your story each day — slow, and with respect.',
+                style: const TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w400,
                   fontFamily: 'Noto Sans Telugu',
@@ -86,15 +104,14 @@ class ReminderScreen extends StatelessWidget {
 
               // ── Time pill ──
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 10,
+                ),
                 decoration: BoxDecoration(
                   color: const Color(0xFFFBEAD2),
                   borderRadius: BorderRadius.circular(99),
-                  border: Border.all(
-                    color: const Color(0xFFEAD3A8),
-                    width: 1,
-                  ),
+                  border: Border.all(color: const Color(0xFFEAD3A8), width: 1),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -106,9 +123,9 @@ class ReminderScreen extends StatelessWidget {
                       color: Color(0xFFB07A2A),
                     ),
                     const SizedBox(width: 8),
-                    const Text(
-                      'ఉదయం 7:00',
-                      style: TextStyle(
+                    Text(
+                      isTelugu ? 'ఉదయం 7:00' : '7:00 AM',
+                      style: const TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
                         fontFamily: 'Noto Sans Telugu',
@@ -131,10 +148,7 @@ class ReminderScreen extends StatelessWidget {
                     gradient: const LinearGradient(
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
-                      colors: [
-                        Color(0xFFE67C22),
-                        Color(0xFFCE5D0E),
-                      ],
+                      colors: [Color(0xFFE67C22), Color(0xFFCE5D0E)],
                     ),
                     boxShadow: [
                       BoxShadow(
@@ -145,7 +159,7 @@ class ReminderScreen extends StatelessWidget {
                     ],
                   ),
                   child: ElevatedButton(
-                    onPressed: () => _finishOnboarding(context),
+                    onPressed: () => _allowReminders(context),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.transparent,
                       shadowColor: Colors.transparent,
@@ -154,9 +168,9 @@ class ReminderScreen extends StatelessWidget {
                         borderRadius: BorderRadius.circular(15),
                       ),
                     ),
-                    child: const Text(
-                      'అనుమతించు',
-                      style: TextStyle(
+                    child: Text(
+                      isTelugu ? 'అనుమతించు' : 'Allow',
+                      style: const TextStyle(
                         fontSize: 17,
                         fontWeight: FontWeight.w600,
                         fontFamily: 'Noto Sans Telugu',
@@ -171,13 +185,13 @@ class ReminderScreen extends StatelessWidget {
 
               // ── Not now button ──
               TextButton(
-                onPressed: () => _finishOnboarding(context),
+                onPressed: () => _skipReminders(context),
                 style: TextButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
-                child: const Text(
-                  'ఇప్పుడు కాదు',
-                  style: TextStyle(
+                child: Text(
+                  isTelugu ? 'ఇప్పుడు కాదు' : 'Not now',
+                  style: const TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w600,
                     fontFamily: 'Noto Sans Telugu',

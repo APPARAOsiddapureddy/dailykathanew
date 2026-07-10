@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../../data/mock_data.dart';
 import '../account/profile_screen.dart';
 import 'explore_screen.dart';
 import 'home_screen.dart';
@@ -19,46 +21,60 @@ class _MainShellState extends State<MainShell> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFFAF4E8),
-      body: IndexedStack(
-        index: _currentIndex,
-        children: [
-          HomeScreen(onNavigateToExplore: () => _switchTab(1)),
-          const ExploreScreen(),
-          const ProfileScreen(),
-        ],
-      ),
-      bottomNavigationBar: Container(
-        height: 62,
-        decoration: const BoxDecoration(
-          color: Color(0xFFFFFDF8),
-          border: Border(
-            top: BorderSide(color: Color(0xFFEADCC2), width: 1),
-          ),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
+    final isTelugu = context.watch<AppState>().language == AppLanguage.telugu;
+    return PopScope(
+      // Only let the back button close the app when already on Home;
+      // from Explore/Profile it should just take you back to Home.
+      canPop: _currentIndex == 0,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        setState(() => _currentIndex = 0);
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFFFAF4E8),
+        body: IndexedStack(
+          index: _currentIndex,
           children: [
-            _NavItem(
-              icon: Icons.home_outlined,
-              label: 'హోమ్',
-              isActive: _currentIndex == 0,
-              onTap: () => setState(() => _currentIndex = 0),
-            ),
-            _NavItem(
-              icon: Icons.explore_outlined,
-              label: 'అన్వేషణ',
-              isActive: _currentIndex == 1,
-              onTap: () => setState(() => _currentIndex = 1),
-            ),
-            _NavItem(
-              icon: Icons.person_outline,
-              label: 'ప్రొఫైల్',
-              isActive: _currentIndex == 2,
-              onTap: () => setState(() => _currentIndex = 2),
-            ),
+            HomeScreen(onNavigateToExplore: () => _switchTab(1)),
+            const ExploreScreen(),
+            const ProfileScreen(),
           ],
+        ),
+        bottomNavigationBar: Container(
+          decoration: const BoxDecoration(
+            color: Color(0xFFFFFDF8),
+            border: Border(top: BorderSide(color: Color(0xFFEADCC2), width: 1)),
+          ),
+          // SafeArea keeps the tab bar above the phone's gesture/nav area.
+          child: SafeArea(
+            top: false,
+            child: SizedBox(
+              height: 62,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _NavItem(
+                    icon: Icons.home_outlined,
+                    label: isTelugu ? 'హోమ్' : 'Home',
+                    isActive: _currentIndex == 0,
+                    onTap: () => setState(() => _currentIndex = 0),
+                  ),
+                  _NavItem(
+                    icon: Icons.explore_outlined,
+                    label: isTelugu ? 'అన్వేషణ' : 'Explore',
+                    isActive: _currentIndex == 1,
+                    onTap: () => setState(() => _currentIndex = 1),
+                  ),
+                  _NavItem(
+                    icon: Icons.person_outline,
+                    label: isTelugu ? 'ప్రొఫైల్' : 'Profile',
+                    isActive: _currentIndex == 2,
+                    onTap: () => setState(() => _currentIndex = 2),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );

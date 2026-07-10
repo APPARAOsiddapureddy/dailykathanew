@@ -84,10 +84,6 @@ class _QuestionScreenState extends State<QuestionScreen> {
         _isAnswered = true;
         _correctIndex = correctIdx;
       });
-
-      if (isCorrect) {
-        context.read<AppState>().updatePoints(10);
-      }
     } catch (e) {
       // On error, still record and move on
       _answeredQuestions.add(
@@ -119,9 +115,10 @@ class _QuestionScreenState extends State<QuestionScreen> {
       });
     } else {
       // All questions done — mark day as complete and show results
-      final correctCount = _answeredQuestions.where((answer) => answer.isCorrect).length;
-      final pointsEarned = correctCount * 10;
-      await context.read<AppState>().submitQuizAttempt(
+      final correctCount = _answeredQuestions
+          .where((answer) => answer.isCorrect)
+          .length;
+      final response = await context.read<AppState>().submitQuizAttempt(
         widget.episode.id,
         _answeredQuestions
             .map(
@@ -131,10 +128,14 @@ class _QuestionScreenState extends State<QuestionScreen> {
               },
             )
             .toList(),
-        pointsEarned: pointsEarned,
         correctCount: correctCount,
       );
       await context.read<AppState>().completeStoryDay(widget.episode.id);
+
+      // Show what the backend actually credited, not a client-side guess.
+      final pointsEarned = response?['pointsAdded'] is int
+          ? response!['pointsAdded'] as int
+          : correctCount;
 
       if (mounted) {
         Navigator.of(context).pushReplacement(
@@ -142,6 +143,7 @@ class _QuestionScreenState extends State<QuestionScreen> {
             builder: (_) => QuizResultsScreen(
               episode: widget.episode,
               answeredQuestions: _answeredQuestions,
+              pointsEarned: pointsEarned,
             ),
           ),
         );

@@ -14,7 +14,7 @@ class StoryListCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final isTelugu = state.language == AppLanguage.telugu;
-    
+
     final progress = state.getStoryProgress(journey.id);
     final hasStarted = progress != null;
     final isCompleted = progress?.isCompleted ?? false;
@@ -59,7 +59,9 @@ class StoryListCard extends StatelessWidget {
           decoration: BoxDecoration(
             color: AppColors.white,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppColors.sacredMaroon.withValues(alpha: 0.1)),
+            border: Border.all(
+              color: AppColors.sacredMaroon.withValues(alpha: 0.1),
+            ),
           ),
           child: Row(
             children: [
@@ -68,13 +70,22 @@ class StoryListCard extends StatelessWidget {
                 child: journey.coverAsset.startsWith('http')
                     ? Image.network(
                         journey.coverAsset,
-                        width: 80, height: 80, fit: BoxFit.cover,
+                        width: 80,
+                        height: 80,
+                        fit: BoxFit.cover,
                         errorBuilder: (_, __, ___) => Image.asset(
                           'assets/mahabharatam-cover.png',
-                          width: 80, height: 80, fit: BoxFit.cover,
+                          width: 80,
+                          height: 80,
+                          fit: BoxFit.cover,
                         ),
                       )
-                    : Image.asset(journey.coverAsset, width: 80, height: 80, fit: BoxFit.cover),
+                    : Image.asset(
+                        journey.coverAsset,
+                        width: 80,
+                        height: 80,
+                        fit: BoxFit.cover,
+                      ),
               ),
               const SizedBox(width: 16),
               Expanded(
@@ -92,17 +103,15 @@ class StoryListCard extends StatelessWidget {
                     const SizedBox(height: 4),
                     Text(
                       statusText,
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: statusColor,
-                      ),
+                      style: TextStyle(fontSize: 14, color: statusColor),
                     ),
                     const SizedBox(height: 8),
                     GestureDetector(
                       onTap: () {
                         Navigator.of(context).push(
                           MaterialPageRoute(
-                            builder: (_) => UniverseDetailScreen(journey: journey),
+                            builder: (_) =>
+                                UniverseDetailScreen(journey: journey),
                           ),
                         );
                       },

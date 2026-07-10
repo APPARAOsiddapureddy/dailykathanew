@@ -1,8 +1,8 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../../core/services/notification_service.dart';
 import 'api_service.dart';
 
 enum AppLanguage { telugu, english }
@@ -111,12 +111,34 @@ class AppState extends ChangeNotifier {
   int _streak = 0;
   int get streak => _streak;
 
+  int _highestStreak = 0;
+  int get highestStreak => _highestStreak;
+
+  DateTime? _joinedAt;
+  DateTime? get joinedAt => _joinedAt;
+
   int _points = 0;
   int get points => _points;
 
   List<Journey> _journeys = [];
   bool _isLoading = false;
   bool get isLoading => _isLoading;
+
+  String? _selectedJourneyId;
+
+  // The signed-in user's id — used to scope per-account local prefs
+  // (like reminder time) so switching accounts on one device can't leak
+  // one account's settings into another's.
+  String? _userId;
+
+  // Notifications / daily reminder
+  bool _notificationsEnabled = true;
+  bool get notificationsEnabled => _notificationsEnabled;
+  TimeOfDay _reminderTime = const TimeOfDay(hour: 7, minute: 0);
+  TimeOfDay get reminderTime => _reminderTime;
+
+  String _reminderHourKey() => 'reminder_hour_${_userId ?? 'guest'}';
+  String _reminderMinuteKey() => 'reminder_minute_${_userId ?? 'guest'}';
 
   String? _authToken;
   String? get authToken => _authToken;
@@ -163,6 +185,10 @@ class AppState extends ChangeNotifier {
   Future<void> _initUser() async {
     final prefs = await SharedPreferences.getInstance();
     _userName = prefs.getString('user_name') ?? "Guest";
+    _selectedJourneyId = prefs.getString('selected_journey_id');
+    _language = prefs.getString('app_language') == 'english'
+        ? AppLanguage.english
+        : AppLanguage.telugu;
     _authToken = await _secureStorage.read(key: _authTokenKey);
     final legacyToken = prefs.getString(_authTokenKey);
     if ((_authToken == null || _authToken!.isEmpty) &&
@@ -175,8 +201,34 @@ class AppState extends ChangeNotifier {
     if (_authToken != null && _authToken!.isNotEmpty) {
       apiService.setAuthToken(_authToken!);
       await _fetchUserProfile();
+    } else {
+      // No signed-in account on this device right now — make sure no
+      // stray reminder from a previous session keeps firing.
+      await NotificationService.instance.cancelDailyReminder();
     }
     notifyListeners();
+  }
+
+  /// Loads the signed-in account's own saved reminder time (falls back to
+  /// 7:00 AM the first time this account is used on this device) and
+  /// makes sure the OS-scheduled notification matches this account's
+  /// actual settings — so logging into a different account never keeps
+  /// firing the previous account's reminder.
+  Future<void> _syncReminderForCurrentUser() async {
+    final prefs = await SharedPreferences.getInstance();
+    _reminderTime = TimeOfDay(
+      hour: prefs.getInt(_reminderHourKey()) ?? 7,
+      minute: prefs.getInt(_reminderMinuteKey()) ?? 0,
+    );
+    if (_notificationsEnabled) {
+      await NotificationService.instance.scheduleDailyReminder(
+        hour: _reminderTime.hour,
+        minute: _reminderTime.minute,
+        isTelugu: _language == AppLanguage.telugu,
+      );
+    } else {
+      await NotificationService.instance.cancelDailyReminder();
+    }
   }
 
   Future<void> _fetchUserProfile() async {
@@ -184,12 +236,17 @@ class AppState extends ChangeNotifier {
       final data = await apiService.getMe();
       final user = data['user'];
       if (user != null) {
+        _userId = user['id']?.toString();
         _userName = user['name'] ?? _userName;
         _streak = user['currentStreak'] ?? 0;
+        _highestStreak = user['highestStreak'] ?? 0;
         final serverPoints = user['points'] ?? 0;
         if (serverPoints is int) {
-          _points = math.max(_points, serverPoints);
+          _points = serverPoints;
         }
+        _joinedAt = DateTime.tryParse(user['createdAt']?.toString() ?? '');
+        _notificationsEnabled = user['notificationPreference'] != 'OFF';
+        await _syncReminderForCurrentUser();
         notifyListeners();
       }
       await _fetchProgress();
@@ -255,12 +312,16 @@ class AppState extends ChangeNotifier {
     _authToken = data['token'];
     final user = data['user'];
     if (user != null) {
+      _userId = user['id']?.toString();
       _userName = user['name'] ?? _userName;
       _streak = user['currentStreak'] ?? 0;
+      _highestStreak = user['highestStreak'] ?? 0;
       final serverPoints = user['points'] ?? 0;
       if (serverPoints is int) {
-        _points = math.max(_points, serverPoints);
+        _points = serverPoints;
       }
+      _joinedAt = DateTime.tryParse(user['createdAt']?.toString() ?? '');
+      _notificationsEnabled = user['notificationPreference'] != 'OFF';
     }
 
     // Store token + name locally
@@ -272,15 +333,26 @@ class AppState extends ChangeNotifier {
       await prefs.setString('user_name', user['name']);
     }
 
+    // This account may have its own reminder time saved from a previous
+    // session on this device (or none yet) — never inherit whatever the
+    // last signed-in account had scheduled.
+    await _syncReminderForCurrentUser();
+
     notifyListeners();
     await _fetchProgress();
   }
 
   Future<void> _clearAuth() async {
     _authToken = null;
+    _userId = null;
     _storyProgressMap = {};
     _completedDayIds = {};
     _lastPhotoIndexByDayId = {};
+    // Reset in-memory only — each account's own saved reminder time stays
+    // in prefs under its own key for next time they log in.
+    _notificationsEnabled = true;
+    _reminderTime = const TimeOfDay(hour: 7, minute: 0);
+    await NotificationService.instance.cancelDailyReminder();
     apiService.clearAuthToken();
     final prefs = await SharedPreferences.getInstance();
     await _secureStorage.delete(key: _authTokenKey);
@@ -291,7 +363,9 @@ class AppState extends ChangeNotifier {
   Future<void> logout() async {
     _userName = "Guest";
     _streak = 0;
+    _highestStreak = 0;
     _points = 0;
+    _joinedAt = null;
     await _clearAuth();
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('user_phone');
@@ -324,11 +398,10 @@ class AppState extends ChangeNotifier {
 
   Future<Map<String, dynamic>?> submitQuizAttempt(
     String storyDayId,
-    List<Map<String, dynamic>> answers,
-    {int? pointsEarned,
+    List<Map<String, dynamic>> answers, {
+    int? pointsEarned,
     int? correctCount,
-    }
-  ) async {
+  }) async {
     if (!isLoggedIn) return null;
     try {
       final response = await apiService.submitQuizAttempt(
@@ -337,16 +410,33 @@ class AppState extends ChangeNotifier {
         pointsEarned: pointsEarned,
         correctCount: correctCount,
       );
-      final serverPoints =
-          response['points'] ?? response['totalPoints'] ?? response['currentPoints'];
-      if (serverPoints is int) {
-        _points = math.max(_points, serverPoints);
+      final pointsAdded = response['pointsAdded'];
+      if (pointsAdded is int) {
+        _points += pointsAdded;
         notifyListeners();
       }
       return response;
     } catch (e) {
       debugPrint('Error submitting quiz attempt: $e');
       return null;
+    }
+  }
+
+  /// Update the display name on the backend and reflect it locally.
+  /// Returns true on success.
+  Future<bool> updateProfileName(String name) async {
+    if (!isLoggedIn) return false;
+    try {
+      final response = await apiService.updateProfile(name: name);
+      final user = response['user'];
+      _userName = (user != null ? user['name'] : null) ?? name;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('user_name', _userName);
+      notifyListeners();
+      return true;
+    } catch (e) {
+      debugPrint('Error updating profile: $e');
+      return false;
     }
   }
 
@@ -359,14 +449,69 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  void setLanguage(AppLanguage lang) {
+  Future<void> setLanguage(AppLanguage lang) async {
     _language = lang;
     notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      'app_language',
+      lang == AppLanguage.english ? 'english' : 'telugu',
+    );
   }
 
-  void updatePoints(int newPoints) {
-    _points += newPoints;
+  /// Enables/disables notifications: syncs the backend preference and the
+  /// local daily-reminder schedule together.
+  Future<void> setNotificationsEnabled(bool enabled) async {
+    _notificationsEnabled = enabled;
     notifyListeners();
+
+    if (isLoggedIn) {
+      try {
+        await apiService.updateProfile(
+          notificationPreference: enabled ? 'DAILY_REMINDER' : 'OFF',
+        );
+      } catch (e) {
+        debugPrint('Error updating notification preference: $e');
+      }
+    }
+
+    if (enabled) {
+      await NotificationService.instance.scheduleDailyReminder(
+        hour: _reminderTime.hour,
+        minute: _reminderTime.minute,
+        isTelugu: _language == AppLanguage.telugu,
+      );
+    } else {
+      await NotificationService.instance.cancelDailyReminder();
+    }
+  }
+
+  /// Changes the daily reminder time and reschedules if enabled.
+  Future<void> setReminderTime(TimeOfDay time) async {
+    _reminderTime = time;
+    notifyListeners();
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_reminderHourKey(), time.hour);
+    await prefs.setInt(_reminderMinuteKey(), time.minute);
+
+    if (_notificationsEnabled) {
+      await NotificationService.instance.scheduleDailyReminder(
+        hour: time.hour,
+        minute: time.minute,
+        isTelugu: _language == AppLanguage.telugu,
+      );
+    }
+  }
+
+  /// Remembers the epic the user picked during onboarding (or from the
+  /// explore tab) so [activeJourney] reflects their choice instead of
+  /// always defaulting to whichever story the API returns first.
+  Future<void> selectJourney(String journeyId) async {
+    _selectedJourneyId = journeyId;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('selected_journey_id', journeyId);
   }
 
   Future<void> fetchData() async {
@@ -457,7 +602,16 @@ class AppState extends ChangeNotifier {
   List<Journey> get currentJourneys =>
       _journeys.isNotEmpty ? _journeys : _mockFallback();
 
-  Journey get activeJourney => currentJourneys.first;
+  Journey get activeJourney {
+    final journeys = currentJourneys;
+    final selectedId = _selectedJourneyId;
+    if (selectedId != null) {
+      for (final journey in journeys) {
+        if (journey.id == selectedId) return journey;
+      }
+    }
+    return journeys.first;
+  }
 
   List<Journey> _mockFallback() {
     return [

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -26,6 +28,8 @@ class _StoryReaderScreenState extends State<StoryReaderScreen>
     with WidgetsBindingObserver {
   int _currentIndex = 0;
   bool _isLoading = true;
+  bool _isFinishing = false;
+  PageController? _pageController;
 
   @override
   void initState() {
@@ -38,6 +42,7 @@ class _StoryReaderScreenState extends State<StoryReaderScreen>
   void dispose() {
     _persistProgress();
     WidgetsBinding.instance.removeObserver(this);
+    _pageController?.dispose();
     super.dispose();
   }
 
@@ -105,6 +110,9 @@ class _StoryReaderScreenState extends State<StoryReaderScreen>
           _currentIndex = savedIndex;
         }
       }
+
+      _pageController = PageController(initialPage: _currentIndex);
+      if (mounted) unawaited(_precacheAround(_currentIndex));
     } catch (e) {
       debugPrint('Error fetching story day details: $e');
     } finally {
@@ -112,23 +120,30 @@ class _StoryReaderScreenState extends State<StoryReaderScreen>
     }
   }
 
-  void _goNext() {
-    if (_currentIndex < widget.episode.cards.length - 1) {
-      final nextIndex = _currentIndex + 1;
-      setState(() => _currentIndex = nextIndex);
-      context.read<AppState>().updateStoryDayProgress(
-        widget.episode.id,
-        nextIndex,
-      );
-    } else {
-      _finishStory();
+  /// Pre-decodes the previous/current/next photo so swiping between them
+  /// never shows a blank black frame while the network image loads.
+  Future<void> _precacheAround(int index) async {
+    for (final i in [index - 1, index, index + 1]) {
+      if (i < 0 || i >= widget.episode.cards.length) continue;
+      final url = widget.episode.cards[i].imageUrl;
+      if (url == null) continue;
+      if (!mounted) return;
+      try {
+        await precacheImage(NetworkImage(url), context);
+      } catch (_) {}
     }
   }
 
-  void _goPrev() {
-    if (_currentIndex > 0) {
-      setState(() => _currentIndex--);
-    }
+  void _onPageChanged(int page) {
+    setState(() => _currentIndex = page);
+    context.read<AppState>().updateStoryDayProgress(widget.episode.id, page);
+    _precacheAround(page);
+  }
+
+  void _handleEndOverscroll() {
+    if (_isFinishing) return;
+    _isFinishing = true;
+    _finishStory();
   }
 
   void _finishStory() {
@@ -138,10 +153,7 @@ class _StoryReaderScreenState extends State<StoryReaderScreen>
         context.read<AppState>().isDayCompleted(widget.episode.id)) {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (_) => QuizReviewScreen(
-            journey: widget.journey,
-            episode: widget.episode,
-          ),
+          builder: (_) => QuizReviewScreen(episode: widget.episode),
         ),
       );
       return;
@@ -154,6 +166,9 @@ class _StoryReaderScreenState extends State<StoryReaderScreen>
         ),
       );
     } else {
+      // Days with no quiz skip QuestionScreen entirely, so this is the
+      // only place that would ever mark them complete.
+      context.read<AppState>().completeStoryDay(widget.episode.id);
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
           builder: (_) => DayCompleteScreen(episode: widget.episode),
@@ -189,141 +204,107 @@ class _StoryReaderScreenState extends State<StoryReaderScreen>
       );
     }
 
-    final card = widget.episode.cards[_currentIndex];
     final totalCards = widget.episode.cards.length;
 
     return Scaffold(
       backgroundColor: Colors.black,
-      body: GestureDetector(
-        onTapUp: (details) {
-          final screenWidth = MediaQuery.of(context).size.width;
-          if (details.globalPosition.dx < screenWidth * 0.3) {
-            _goPrev();
-          } else {
-            _goNext();
-          }
-        },
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            // ── Full-screen image ──
-            if (card.imageUrl != null)
-              Image.network(
-                card.imageUrl!,
-                fit: BoxFit.cover,
-                width: double.infinity,
-                height: double.infinity,
-                errorBuilder: (_, __, ___) => Image.asset(
-                  'assets/mahabharatam-cover.png',
-                  fit: BoxFit.cover,
-                  width: double.infinity,
-                  height: double.infinity,
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          // ── Swipeable full-screen photos ──
+          NotificationListener<OverscrollNotification>(
+            onNotification: (notification) {
+              if (notification.overscroll > 0 &&
+                  _currentIndex == totalCards - 1) {
+                _handleEndOverscroll();
+              }
+              return false;
+            },
+            child: PageView.builder(
+              controller: _pageController,
+              itemCount: totalCards,
+              onPageChanged: _onPageChanged,
+              itemBuilder: (context, index) {
+                final card = widget.episode.cards[index];
+                return card.imageUrl != null
+                    ? Image.network(
+                        card.imageUrl!,
+                        fit: BoxFit.cover,
+                        width: double.infinity,
+                        height: double.infinity,
+                        errorBuilder: (_, __, ___) => Image.asset(
+                          'assets/mahabharatam-cover.png',
+                          fit: BoxFit.cover,
+                          width: double.infinity,
+                          height: double.infinity,
+                        ),
+                      )
+                    : Image.asset(
+                        'assets/mahabharatam-cover.png',
+                        fit: BoxFit.cover,
+                        width: double.infinity,
+                        height: double.infinity,
+                      );
+              },
+            ),
+          ),
+
+          // ── Progress bars at the very top ──
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 8,
+            left: 8,
+            right: 8,
+            child: Row(
+              children: List.generate(totalCards, (i) {
+                return Expanded(
+                  child: Container(
+                    height: 3,
+                    margin: EdgeInsets.only(right: i < totalCards - 1 ? 3 : 0),
+                    decoration: BoxDecoration(
+                      color: i <= _currentIndex
+                          ? Colors.white
+                          : Colors.white.withValues(alpha: 0.3),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                );
+              }),
+            ),
+          ),
+
+          // ── Close button (top-left) ──
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 18,
+            left: 12,
+            child: GestureDetector(
+              onTap: () => Navigator.of(context).pop(),
+              child: Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.4),
+                  shape: BoxShape.circle,
                 ),
-              )
-            else
-              Image.asset(
-                'assets/mahabharatam-cover.png',
-                fit: BoxFit.cover,
-                width: double.infinity,
-                height: double.infinity,
-              ),
-
-            // ── Progress bars at the very top ──
-            Positioned(
-              top: MediaQuery.of(context).padding.top + 8,
-              left: 8,
-              right: 8,
-              child: Row(
-                children: List.generate(totalCards, (i) {
-                  return Expanded(
-                    child: Container(
-                      height: 3,
-                      margin: EdgeInsets.only(
-                        right: i < totalCards - 1 ? 3 : 0,
-                      ),
-                      decoration: BoxDecoration(
-                        color: i <= _currentIndex
-                            ? Colors.white
-                            : Colors.white.withValues(alpha: 0.3),
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  );
-                }),
+                child: const Icon(Icons.close, color: Colors.white, size: 18),
               ),
             ),
+          ),
 
-            // ── Close button (top-left) ──
-            Positioned(
-              top: MediaQuery.of(context).padding.top + 18,
-              left: 12,
-              child: GestureDetector(
-                onTap: () => Navigator.of(context).pop(),
-                child: Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.4),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.close, color: Colors.white, size: 18),
-                ),
+          // ── Bottom: photo counter ──
+          Positioned(
+            bottom: MediaQuery.of(context).padding.bottom + 16,
+            left: 16,
+            right: 16,
+            child: Text(
+              '${_currentIndex + 1}/$totalCards',
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
               ),
             ),
-
-            // ── Bottom: counter + Next button ──
-            Positioned(
-              bottom: MediaQuery.of(context).padding.bottom + 16,
-              left: 16,
-              right: 16,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    '${_currentIndex + 1}/$totalCards',
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  GestureDetector(
-                    onTap: _goNext,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 24,
-                        vertical: 12,
-                      ),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFE0701C),
-                        borderRadius: BorderRadius.circular(24),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(
-                            Icons.arrow_forward,
-                            color: Colors.white,
-                            size: 18,
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            _currentIndex < totalCards - 1 ? 'Next' : 'Finish',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 14,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

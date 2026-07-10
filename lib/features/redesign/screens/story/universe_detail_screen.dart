@@ -150,11 +150,19 @@ class UniverseDetailScreen extends StatelessWidget {
                     final isCompleted = context.read<AppState>().isDayCompleted(
                       episode.id,
                     );
+                    // Day 1 is always open; every later day requires the
+                    // previous one to be completed first.
+                    final isLocked =
+                        index > 0 &&
+                        !context.read<AppState>().isDayCompleted(
+                          allEpisodes[index - 1].id,
+                        );
                     return _DayTile(
                       episode: episode,
                       journey: journey,
                       isTelugu: isTelugu,
                       isCompleted: isCompleted,
+                      isLocked: isLocked,
                     );
                   }, childCount: allEpisodes.length),
                 ),
@@ -169,12 +177,14 @@ class _DayTile extends StatelessWidget {
   final Journey journey;
   final bool isTelugu;
   final bool isCompleted;
+  final bool isLocked;
 
   const _DayTile({
     required this.episode,
     required this.journey,
     required this.isTelugu,
     required this.isCompleted,
+    required this.isLocked,
   });
 
   @override
@@ -185,124 +195,152 @@ class _DayTile extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 5),
-      child: Material(
-        color: const Color(0xFFFFFDF8),
-        borderRadius: BorderRadius.circular(14),
-        child: InkWell(
+      child: Opacity(
+        opacity: isLocked ? 0.55 : 1,
+        child: Material(
+          color: const Color(0xFFFFFDF8),
           borderRadius: BorderRadius.circular(14),
-          onTap: () {
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => StoryReaderScreen(
-                  journey: journey,
-                  episode: episode,
-                  reviewAfterReading: isCompleted,
-                ),
-              ),
-            );
-          },
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: const Color(0xFFEADCC2)),
-            ),
-            child: Row(
-              children: [
-                // Day number badge
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: const Alignment(-0.4, -1.0),
-                      end: const Alignment(0.4, 1.0),
-                      colors: isCompleted
-                          ? [Colors.green.shade400, Colors.green.shade700]
-                          : [const Color(0xFFF6C25A), const Color(0xFFD0641C)],
+          child: InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: () {
+              if (isLocked) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      isTelugu
+                          ? 'ముందు రోజులను పూర్తి చేయండి'
+                          : 'Complete the previous day first',
                     ),
-                    borderRadius: BorderRadius.circular(12),
                   ),
-                  alignment: Alignment.center,
-                  child: isCompleted
-                      ? const Icon(Icons.check, color: Colors.white, size: 20)
-                      : Text(
-                          '${episode.dayNumber}',
+                );
+                return;
+              }
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => StoryReaderScreen(
+                    journey: journey,
+                    episode: episode,
+                    reviewAfterReading: isCompleted,
+                  ),
+                ),
+              );
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFFEADCC2)),
+              ),
+              child: Row(
+                children: [
+                  // Day number badge
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: const Alignment(-0.4, -1.0),
+                        end: const Alignment(0.4, 1.0),
+                        colors: isLocked
+                            ? [Colors.grey.shade400, Colors.grey.shade600]
+                            : isCompleted
+                            ? [Colors.green.shade400, Colors.green.shade700]
+                            : [
+                                const Color(0xFFF6C25A),
+                                const Color(0xFFD0641C),
+                              ],
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    alignment: Alignment.center,
+                    child: isLocked
+                        ? const Icon(Icons.lock, color: Colors.white, size: 18)
+                        : isCompleted
+                        ? const Icon(Icons.check, color: Colors.white, size: 20)
+                        : Text(
+                            '${episode.dayNumber}',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 16,
+                            ),
+                          ),
+                  ),
+                  const SizedBox(width: 14),
+                  // Day info
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          dayLabel,
                           style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w700,
                             fontSize: 16,
-                          ),
-                        ),
-                ),
-                const SizedBox(width: 14),
-                // Day info
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        dayLabel,
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF6B1F22),
-                          fontFamily: 'Noto Sans Telugu',
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        episode.title,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          color: Color(0xFF8B7660),
-                          fontFamily: 'Noto Sans Telugu',
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-                // Action buttons
-                if (isCompleted)
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // View Quiz Results label
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFBEAD2),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          isTelugu ? 'ఫలితాలు' : 'Results',
-                          style: const TextStyle(
-                            fontSize: 12,
                             fontWeight: FontWeight.w600,
-                            color: Color(0xFFE0701C),
+                            color: Color(0xFF6B1F22),
+                            fontFamily: 'Noto Sans Telugu',
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      const Icon(
-                        Icons.check_circle,
-                        color: Colors.green,
-                        size: 28,
-                      ),
-                    ],
-                  )
-                else
-                  const Icon(
-                    Icons.play_circle_fill,
-                    color: Color(0xFFE0701C),
-                    size: 28,
+                        const SizedBox(height: 2),
+                        Text(
+                          episode.title,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: Color(0xFF8B7660),
+                            fontFamily: 'Noto Sans Telugu',
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
                   ),
-              ],
+                  // Action buttons
+                  if (isLocked)
+                    const Icon(
+                      Icons.lock_outline,
+                      color: Color(0xFF9A876E),
+                      size: 26,
+                    )
+                  else if (isCompleted)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // View Quiz Results label
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFBEAD2),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            isTelugu ? 'ఫలితాలు' : 'Results',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFFE0701C),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        const Icon(
+                          Icons.check_circle,
+                          color: Colors.green,
+                          size: 28,
+                        ),
+                      ],
+                    )
+                  else
+                    const Icon(
+                      Icons.play_circle_fill,
+                      color: Color(0xFFE0701C),
+                      size: 28,
+                    ),
+                ],
+              ),
             ),
           ),
         ),

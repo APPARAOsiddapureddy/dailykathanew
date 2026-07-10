@@ -1,8 +1,12 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../../../../app/config.dart';
 import '../../data/api_service.dart';
 import '../../data/mock_data.dart';
+import '../legal/terms_screen.dart';
 import '../main/main_shell.dart';
 import '../onboarding/language_screen.dart';
 
@@ -128,10 +132,20 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
                 ),
                 child: _isChecking
                     ? const SizedBox(
-                        height: 20, width: 20,
-                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
                       )
-                    : const Text('Continue', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    : const Text(
+                        'Continue',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
               ),
             ],
           ),
@@ -152,12 +166,26 @@ class NameScreen extends StatefulWidget {
 class _NameScreenState extends State<NameScreen> {
   final TextEditingController _controller = TextEditingController();
   bool _isSubmitting = false;
+  bool _termsAccepted = false;
   String? _error;
+
+  Future<void> _openPrivacyPolicy() async {
+    await launchUrl(
+      Uri.parse('${AppConfig.apiBaseUrl}/privacy-policy'),
+      mode: LaunchMode.externalApplication,
+    );
+  }
 
   Future<void> _submit() async {
     final name = _controller.text.trim();
     if (name.isEmpty) {
       setState(() => _error = 'Please enter your name');
+      return;
+    }
+    if (!_termsAccepted) {
+      setState(
+        () => _error = 'Please accept the Terms & Conditions to continue',
+      );
       return;
     }
 
@@ -223,7 +251,60 @@ class _NameScreenState extends State<NameScreen> {
                   errorText: _error,
                 ),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 16),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Checkbox(
+                    value: _termsAccepted,
+                    activeColor: const Color(0xFFE0701C),
+                    onChanged: (value) =>
+                        setState(() => _termsAccepted = value ?? false),
+                  ),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 14),
+                      child: Text.rich(
+                        TextSpan(
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: Color(0xFF6B5A45),
+                          ),
+                          children: [
+                            const TextSpan(text: 'I agree to the '),
+                            TextSpan(
+                              text: 'Terms & Conditions',
+                              style: const TextStyle(
+                                color: Color(0xFFE0701C),
+                                fontWeight: FontWeight.w600,
+                              ),
+                              recognizer: TapGestureRecognizer()
+                                ..onTap = () {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => const TermsScreen(),
+                                    ),
+                                  );
+                                },
+                            ),
+                            const TextSpan(text: ' and '),
+                            TextSpan(
+                              text: 'Privacy Policy',
+                              style: const TextStyle(
+                                color: Color(0xFFE0701C),
+                                fontWeight: FontWeight.w600,
+                              ),
+                              recognizer: TapGestureRecognizer()
+                                ..onTap = _openPrivacyPolicy,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
               ElevatedButton(
                 onPressed: _isSubmitting ? null : _submit,
                 style: ElevatedButton.styleFrom(
@@ -236,10 +317,20 @@ class _NameScreenState extends State<NameScreen> {
                 ),
                 child: _isSubmitting
                     ? const SizedBox(
-                        height: 20, width: 20,
-                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
                       )
-                    : const Text('Start Journey', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    : const Text(
+                        'Start Journey',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
               ),
             ],
           ),

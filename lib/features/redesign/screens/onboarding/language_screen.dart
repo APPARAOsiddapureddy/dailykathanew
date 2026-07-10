@@ -6,21 +6,36 @@ import '../../theme/redesign_theme.dart';
 import 'journey_selection_screen.dart';
 
 class LanguageScreen extends StatefulWidget {
-  const LanguageScreen({super.key});
+  /// True when reached from the first-run onboarding flow (should continue
+  /// on to picking a journey). False when reopened later, e.g. from
+  /// Settings, where changing the language should just go back.
+  final bool isOnboarding;
+
+  const LanguageScreen({super.key, this.isOnboarding = true});
 
   @override
   State<LanguageScreen> createState() => _LanguageScreenState();
 }
 
 class _LanguageScreenState extends State<LanguageScreen> {
-  AppLanguage? _selectedLanguage;
+  late AppLanguage? _selectedLanguage;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedLanguage = context.read<AppState>().language;
+  }
 
   void _continue() {
-    if (_selectedLanguage != null) {
-      context.read<AppState>().setLanguage(_selectedLanguage!);
+    if (_selectedLanguage == null) return;
+
+    context.read<AppState>().setLanguage(_selectedLanguage!);
+    if (widget.isOnboarding) {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const JourneySelectionScreen()),
       );
+    } else {
+      Navigator.of(context).pop();
     }
   }
 
@@ -48,10 +63,7 @@ class _LanguageScreenState extends State<LanguageScreen> {
               const SizedBox(height: 8),
               const Text(
                 'Choose your language · మీరు దీన్ని తర్వాత మార్చవచ్చు',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: AppColors.softBrown,
-                ),
+                style: TextStyle(fontSize: 14, color: AppColors.softBrown),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 48),
@@ -59,14 +71,16 @@ class _LanguageScreenState extends State<LanguageScreen> {
                 title: 'తెలుగు',
                 subtitle: 'Telugu',
                 isSelected: _selectedLanguage == AppLanguage.telugu,
-                onTap: () => setState(() => _selectedLanguage = AppLanguage.telugu),
+                onTap: () =>
+                    setState(() => _selectedLanguage = AppLanguage.telugu),
               ),
               const SizedBox(height: 16),
               _LanguageCard(
                 title: 'English',
                 subtitle: 'ఇంగ్లీష్',
                 isSelected: _selectedLanguage == AppLanguage.english,
-                onTap: () => setState(() => _selectedLanguage = AppLanguage.english),
+                onTap: () =>
+                    setState(() => _selectedLanguage = AppLanguage.english),
               ),
               const Spacer(),
               ElevatedButton(
@@ -76,7 +90,11 @@ class _LanguageScreenState extends State<LanguageScreen> {
                       ? AppColors.deepSaffron
                       : AppColors.greyText.withValues(alpha: 0.3),
                 ),
-                child: const Text('కొనసాగించండి'),
+                child: Text(
+                  _selectedLanguage == AppLanguage.english
+                      ? 'Continue'
+                      : 'కొనసాగించండి',
+                ),
               ),
               const SizedBox(height: 16),
             ],
@@ -132,7 +150,9 @@ class _LanguageCard extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 24,
                     fontWeight: FontWeight.bold,
-                    color: isSelected ? AppColors.deepSaffron : AppColors.sacredMaroon,
+                    color: isSelected
+                        ? AppColors.deepSaffron
+                        : AppColors.sacredMaroon,
                   ),
                 ),
                 Text(
