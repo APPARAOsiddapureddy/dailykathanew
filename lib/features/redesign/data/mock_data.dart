@@ -178,8 +178,14 @@ class AppState extends ChangeNotifier {
   }
 
   AppState() {
-    _initUser();
-    fetchData();
+    _bootstrap();
+  }
+
+  /// Sequenced startup: the saved (or account) language must be known
+  /// before content is fetched, so stories arrive in the right language.
+  Future<void> _bootstrap() async {
+    await _initUser();
+    await fetchData();
   }
 
   Future<void> _initUser() async {
@@ -189,6 +195,7 @@ class AppState extends ChangeNotifier {
     _language = prefs.getString('app_language') == 'english'
         ? AppLanguage.english
         : AppLanguage.telugu;
+    ApiService.contentLang = _language == AppLanguage.english ? 'en' : 'te';
     _authToken = await _secureStorage.read(key: _authTokenKey);
     final legacyToken = prefs.getString(_authTokenKey);
     if ((_authToken == null || _authToken!.isEmpty) &&
@@ -231,6 +238,27 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  /// Adopts the account's language preference from the backend — the DB copy
+  /// is authoritative on login/session restore (reinstall, second device).
+  /// Does NOT write back to the server; only setLanguage does that.
+  Future<void> _applyServerLanguage(dynamic selectedLanguage) async {
+    if (selectedLanguage == null) return;
+    final AppLanguage serverLang = selectedLanguage == 'ENGLISH'
+        ? AppLanguage.english
+        : AppLanguage.telugu;
+    if (serverLang == _language) return;
+    _language = serverLang;
+    ApiService.contentLang = serverLang == AppLanguage.english ? 'en' : 'te';
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      'app_language',
+      serverLang == AppLanguage.english ? 'english' : 'telugu',
+    );
+    notifyListeners();
+    // Content already on screen was fetched in the old language.
+    await fetchData();
+  }
+
   Future<void> _fetchUserProfile() async {
     try {
       final data = await apiService.getMe();
@@ -246,6 +274,7 @@ class AppState extends ChangeNotifier {
         }
         _joinedAt = DateTime.tryParse(user['createdAt']?.toString() ?? '');
         _notificationsEnabled = user['notificationPreference'] != 'OFF';
+        await _applyServerLanguage(user['selectedLanguage']);
         await _syncReminderForCurrentUser();
         notifyListeners();
       }
@@ -327,6 +356,7 @@ class AppState extends ChangeNotifier {
       }
       _joinedAt = DateTime.tryParse(user['createdAt']?.toString() ?? '');
       _notificationsEnabled = user['notificationPreference'] != 'OFF';
+      await _applyServerLanguage(user['selectedLanguage']);
     }
 
     // Store token + name locally
@@ -455,13 +485,32 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> setLanguage(AppLanguage lang) async {
+    final bool changed = lang != _language;
     _language = lang;
+    ApiService.contentLang = lang == AppLanguage.english ? 'en' : 'te';
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
       'app_language',
       lang == AppLanguage.english ? 'english' : 'telugu',
     );
+
+    if (isLoggedIn) {
+      try {
+        await apiService.updateProfile(
+          selectedLanguage: lang == AppLanguage.english ? 'ENGLISH' : 'TELUGU',
+        );
+      } catch (e) {
+        // The local preference already applied; don't block on a flaky
+        // connection — the backend copy just stays stale until next change.
+        debugPrint('Error updating language preference: $e');
+      }
+    }
+
+    if (changed) {
+      // Reload content so titles/questions arrive in the new language.
+      await fetchData();
+    }
   }
 
   /// Enables/disables notifications: syncs the backend preference and the
@@ -537,26 +586,10 @@ class AppState extends ChangeNotifier {
               )
               .toList();
 
-          // Prefer the CMS cover. Older stories without one use their first
-          // published day's share image or first photo as the heading image.
+          // Covers come only from the CMS cover upload now (one per story,
+          // language-neutral) — no more borrowing day photos.
           String coverAsset = 'assets/mahabharatam-cover.png';
-          String? rawUrl = s['coverImageUrl']?.toString().trim();
-          if ((rawUrl == null || !rawUrl.startsWith('http')) &&
-              days.isNotEmpty) {
-            final firstDayNumber = days.first['dayNumber'];
-            if (firstDayNumber is int) {
-              try {
-                rawUrl = await apiService.fetchStoryHeadingImage(
-                  s['id'].toString(),
-                  firstDayNumber,
-                );
-              } catch (error) {
-                debugPrint(
-                  'Error loading heading image for ${s['title']}: $error',
-                );
-              }
-            }
-          }
+          final rawUrl = s['coverImageUrl']?.toString().trim();
           if (rawUrl != null && rawUrl.startsWith('http')) {
             coverAsset = ApiService.proxiedImageUrl(rawUrl);
           }

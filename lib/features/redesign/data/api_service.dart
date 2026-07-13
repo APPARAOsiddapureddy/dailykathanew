@@ -6,6 +6,12 @@ import '../../../app/config.dart';
 
 class ApiService {
   static String get baseUrl => '${AppConfig.apiBaseUrl}/api';
+
+  /// Content language sent to public content endpoints (te | en | hin).
+  /// Kept in sync with the user's preference by AppState; authenticated
+  /// endpoints resolve it server-side from the account instead.
+  static String contentLang = 'te';
+
   String? _authToken;
 
   static String proxiedImageUrl(String imageUrl) {
@@ -87,17 +93,20 @@ class ApiService {
     throw Exception('Failed to get user profile');
   }
 
-  /// Update the current user's profile (e.g. display name or
-  /// notification preference: ALL | DAILY_REMINDER | OFF)
+  /// Update the current user's profile (e.g. display name,
+  /// notification preference: ALL | DAILY_REMINDER | OFF, or
+  /// selected language: TELUGU | ENGLISH | HINDI)
   Future<Map<String, dynamic>> updateProfile({
     String? name,
     String? notificationPreference,
+    String? selectedLanguage,
   }) async {
     final body = <String, dynamic>{};
     if (name != null) body['name'] = name;
     if (notificationPreference != null) {
       body['notificationPreference'] = notificationPreference;
     }
+    if (selectedLanguage != null) body['selectedLanguage'] = selectedLanguage;
     final response = await http.patch(
       Uri.parse('$baseUrl/users/me'),
       headers: _headers,
@@ -125,7 +134,9 @@ class ApiService {
 
   Future<List<dynamic>> fetchStories() async {
     try {
-      final response = await http.get(Uri.parse('$baseUrl/app/stories'));
+      final response = await http.get(
+        Uri.parse('$baseUrl/app/stories?lang=$contentLang'),
+      );
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         return data['stories'] ?? [];
@@ -143,7 +154,7 @@ class ApiService {
   ) async {
     try {
       final response = await http.get(
-        Uri.parse('$baseUrl/app/stories/$storyId/days/$dayNumber'),
+        Uri.parse('$baseUrl/app/stories/$storyId/days/$dayNumber?lang=$contentLang'),
       );
       if (response.statusCode == 200) {
         return json.decode(response.body);
@@ -155,39 +166,13 @@ class ApiService {
     }
   }
 
-  Future<String?> fetchStoryHeadingImage(
-    String storyId,
-    int firstPublishedDayNumber,
-  ) async {
-    final data = await fetchStoryDay(storyId, firstPublishedDayNumber);
-    final day = data['day'];
-    if (day is Map) {
-      final shareImage = day['shareCardImageUrl']?.toString().trim();
-      if (shareImage != null && shareImage.startsWith('http')) {
-        return shareImage;
-      }
-    }
-
-    final photos = data['photos'];
-    if (photos is List && photos.isNotEmpty) {
-      final firstPhoto = photos.first;
-      if (firstPhoto is Map) {
-        final imageUrl = firstPhoto['imageUrl']?.toString().trim();
-        if (imageUrl != null && imageUrl.startsWith('http')) {
-          return imageUrl;
-        }
-      }
-    }
-    return null;
-  }
-
   Future<Map<String, dynamic>> checkAnswer(
     String questionId,
     String optionId,
   ) async {
     try {
       final response = await http.post(
-        Uri.parse('$baseUrl/app/questions/$questionId/check-answer'),
+        Uri.parse('$baseUrl/app/questions/$questionId/check-answer?lang=$contentLang'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({'optionId': optionId}),
       );

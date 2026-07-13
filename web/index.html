@@ -34,6 +34,14 @@
 
   <title>Daily Katha</title>
   <link rel="manifest" href="manifest.json">
+
+  <style>
+    /* Hide the badge Firebase Auth's invisible reCAPTCHA adds on web.
+       The verification itself still runs; only the floating widget is hidden. */
+    .grecaptcha-badge {
+      visibility: hidden !important;
+    }
+  </style>
 </head>
 <body>
   <!--
