@@ -1,11 +1,10 @@
 ﻿class AppConfig {
   const AppConfig._();
 
-  // TEMPORARY: default points at the local backend for development.
-  // Switch back to https://daily-katha-cms.onrender.com before building
-  // any release (or pass --dart-define=API_BASE_URL=...).
+  // Defaults to the deployed backend. For local development pass
+  // --dart-define=API_BASE_URL=http://localhost:4000 (or your LAN IP).
   static const String apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://localhost:4000',
+    defaultValue: 'https://daily-katha-cms.onrender.com',
   );
 }
